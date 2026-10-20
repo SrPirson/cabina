@@ -1,3 +1,5 @@
+<p align="center"><img src=".claude-plugin/icon.png" alt="Cabina" width="128"></p>
+
 <h1 align="center">Cabina</h1>
 
 <p align="center"><strong>A clean side pane for Claude Code: everything your session is doing, at a glance.</strong></p>
