@@ -1,0 +1,76 @@
+{
+  "name": "cabina",
+  "version": "1.0.0",
+  "description": "A clean side pane for Claude Code: model, context, rate limits, cost, activity and project at a glance. Themes, light/dark backgrounds and any language.",
+  "author": { "name": "SrPirson", "url": "https://github.com/SrPirson" },
+  "homepage": "https://github.com/SrPirson/cabina",
+  "repository": "https://github.com/SrPirson/cabina",
+  "license": "MIT",
+  "keywords": ["pane", "dashboard", "status", "usage", "cost", "rate-limits", "themes", "i18n"],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "language": {
+      "type": "string",
+      "title": "Idioma / Language",
+      "description": "auto = Claude Code's language setting; custom = the language typed below",
+      "options": ["auto", "es", "en", "pt", "fr", "de", "it", "custom"],
+      "default": "auto"
+    },
+    "customLanguage": {
+      "type": "string",
+      "title": "Otro idioma / Other language",
+      "description": "Any language name or code (swahili, català, ja…), used when language is custom",
+      "default": ""
+    },
+    "theme": {
+      "type": "string",
+      "title": "Tema / Theme",
+      "description": "Colours of the bars, the accent and the branch; or /cabina theme <name>",
+      "options": ["classic", "catppuccin", "dracula", "nord", "tokyo-night", "gruvbox", "github", "solarized", "colorblind", "contrast", "mono"],
+      "default": "classic"
+    },
+    "background": {
+      "type": "string",
+      "title": "Fondo / Background",
+      "description": "auto = the terminal's own; dark or light paints the pane, with text to match",
+      "options": ["auto", "dark", "light"],
+      "default": "auto"
+    },
+    "show_usage": {
+      "type": "boolean",
+      "title": "Mostrar Consumo / Usage",
+      "description": "Show this section of the pane",
+      "default": true
+    },
+    "show_cost": {
+      "type": "boolean",
+      "title": "Mostrar Coste / Cost",
+      "description": "Show this section of the pane",
+      "default": true
+    },
+    "show_activity": {
+      "type": "boolean",
+      "title": "Mostrar Actividad / Activity",
+      "description": "Show this section of the pane",
+      "default": true
+    },
+    "show_trend": {
+      "type": "boolean",
+      "title": "Mostrar Tendencia / Trend",
+      "description": "Show this section of the pane",
+      "default": true
+    },
+    "show_files": {
+      "type": "boolean",
+      "title": "Mostrar Archivos / Files",
+      "description": "Show this section of the pane",
+      "default": true
+    },
+    "show_project": {
+      "type": "boolean",
+      "title": "Mostrar Proyecto / Project",
+      "description": "Show this section of the pane",
+      "default": true
+    }
+  }
+}

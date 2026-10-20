@@ -1,0 +1,12 @@
+{
+  "name": "cabina",
+  "owner": { "name": "SrPirson", "url": "https://github.com/SrPirson" },
+  "description": "Cabina, a side pane mod for Claude Code.",
+  "plugins": [
+    {
+      "name": "cabina",
+      "source": "./",
+      "description": "A clean side pane for Claude Code: model, context, rate limits, cost, activity and project at a glance."
+    }
+  ]
+}
