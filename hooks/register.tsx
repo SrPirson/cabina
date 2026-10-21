@@ -203,7 +203,7 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     void checkVersion($).catch(() => undefined)
     const known = BUILT_IN[normalize(setting)]
-    await $.command.register({ name: 'cabina', description: (known ?? BUILT_IN.en!).describe, argumentHint: '[config | theme <…> | language <…> | background <…> | help]' })
+    await $.command.register({ name: 'cabina', description: (known ?? BUILT_IN.en!).describe, argumentHint: '[close | config | theme <…> | language <…> | background <…> | help]' })
     void resolveStrings($, setting)
       .then(t => update($, text, () => t))
       .catch(() => undefined)
@@ -235,6 +235,10 @@ export const register: Register = (on, options) => {
       await openSettings($)
       return { text: `Cabina · ${t.settings}` }
     }
+    if (/^(close|closed|hide|cerrar|ocultar|fechar|fermer|schließen|chiudi)$/i.test(sub)) {
+      await $.ui.close({ id: PANE })
+      return { text: t.closed }
+    }
     if (/^(theme|tema|thème|thema)$/i.test(sub) && arg) {
       const id = arg.toLowerCase().replace(/-light$/, '')
       if (!isThemeId(id)) return { text: `${t.theme}: ${THEME_IDS.join(', ')}` }
@@ -253,6 +257,7 @@ export const register: Register = (on, options) => {
       return {
         text: [
           '/cabina                  Cabina',
+          `/cabina close            ✕ ${t.close}`,
           `/cabina config           ⚙ ${t.settings}`,
           `/cabina theme <…>        ${t.theme}: ${THEME_IDS.join(', ')}`,
           `/cabina language <…>     ${t.language}: auto, ${Object.keys(ENDONYM).join(', ')}, swahili…`,

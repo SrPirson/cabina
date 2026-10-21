@@ -34,7 +34,7 @@ export type Snapshot = {
 export type Strings = {
   context: string; h5: string; d7: string; spend: string; cost: string; last: string
   agents: string; running: string; idle: string; compact: string; compacted: string
-  opened: string; describe: string
+  opened: string; closed: string; describe: string
   settings: string; language: string; theme: string; auto: string; other: string; otherHint: string; close: string; hint: string
   session: string; prompts: string; tools: string; trend: string; files: string; uncommitted: string; clean: string
   background: string; bgAuto: string; bgDark: string; bgLight: string

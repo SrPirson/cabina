@@ -89,3 +89,14 @@ test('elegir un apartado en Ajustes lo oculta, y otra vez lo muestra', { options
   expect(saved['cabina.show_trend']).toBe(true)
   await ui.unmount()
 })
+
+test('/cabina close y /cabina cerrar cierran el panel', async ($, on) => {
+  const closed: string[] = []
+  on('ui.close', (_, e) => {
+    closed.push(e.id)
+    return { value: undefined } as never
+  })
+  await $.command.run({ command: 'cabina', args: 'close' } as never)
+  await $.command.run({ command: 'cabina', args: 'cerrar' } as never)
+  expect(closed).toEqual(['cabina', 'cabina'])
+})

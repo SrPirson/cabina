@@ -100,6 +100,7 @@ claude plugin uninstall cabina@cabina
 | Comando | Qué hace |
 | --- | --- |
 | `/cabina` | Abre el panel |
+| `/cabina cerrar` | Cierra el panel (`/cabina` lo vuelve a abrir) |
 | `/cabina config` | Abre la vista de ajustes |
 | `/cabina tema <nombre>` | Cambia de tema al momento, p. ej. `/cabina tema dracula` |
 | `/cabina idioma <nombre>` | Elige el idioma: un código (`es`, `fr`) o cualquier nombre (`swahili`, `català`) |

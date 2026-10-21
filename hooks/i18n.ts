@@ -3,7 +3,7 @@ import type { Strings } from '../types'
 const en: Strings = {
   context: 'Context', h5: '5 hours', d7: '7 days', spend: 'Spend', cost: 'Cost', last: 'last',
   agents: 'Agents', running: '{n} running', idle: 'idle', compact: 'compact', compacted: '{n}× compacted',
-  opened: 'Cabina pane opened.', describe: 'Open the Cabina pane (config: settings)',
+  opened: 'Cabina pane opened.', closed: 'Cabina pane closed.', describe: 'Open the Cabina pane (config: settings)',
   settings: 'Settings', language: 'Language', theme: 'Theme', auto: 'Automatic', other: 'Other language',
   otherHint: 'name or code, e.g. swahili', close: 'close', hint: '↑↓ choose · Enter save · Tab next · Esc close',
   session: 'Session', prompts: '{n} prompts', tools: 'Tools', trend: 'Trend · {n} turns', files: 'Files', uncommitted: '{n} uncommitted', clean: 'clean',
@@ -19,7 +19,7 @@ export const BUILT_IN: Record<string, Strings> = {
   es: {
     context: 'Contexto', h5: '5 horas', d7: '7 días', spend: 'Gasto', cost: 'Coste', last: 'último',
     agents: 'Agentes', running: '{n} en curso', idle: 'en espera', compact: 'compactar', compacted: '{n}× compactado',
-    opened: 'Panel Cabina abierto.', describe: 'Abre el panel Cabina (config: ajustes)',
+    opened: 'Panel Cabina abierto.', closed: 'Panel Cabina cerrado.', describe: 'Abre el panel Cabina (config: ajustes)',
     settings: 'Ajustes', language: 'Idioma', theme: 'Tema', auto: 'Automático', other: 'Otro idioma',
     otherHint: 'nombre o código, p. ej. swahili', close: 'cerrar', hint: '↑↓ elegir · Enter guardar · Tab siguiente · Esc cerrar',
     session: 'Sesión', prompts: '{n} prompts', tools: 'Herram.', trend: 'Tendencia · {n} turnos', files: 'Archivos', uncommitted: '{n} sin commitear', clean: 'sin cambios',
@@ -32,7 +32,7 @@ export const BUILT_IN: Record<string, Strings> = {
   pt: {
     context: 'Contexto', h5: '5 horas', d7: '7 dias', spend: 'Gasto', cost: 'Custo', last: 'último',
     agents: 'Agentes', running: '{n} em curso', idle: 'em espera', compact: 'compactar', compacted: '{n}× compactado',
-    opened: 'Painel Cabina aberto.', describe: 'Abre o painel Cabina (config: definições)',
+    opened: 'Painel Cabina aberto.', closed: 'Painel Cabina fechado.', describe: 'Abre o painel Cabina (config: definições)',
     settings: 'Definições', language: 'Idioma', theme: 'Tema', auto: 'Automático', other: 'Outro idioma',
     otherHint: 'nome ou código, p. ex. swahili', close: 'fechar', hint: '↑↓ escolher · Enter guardar · Tab seguinte · Esc fechar',
     session: 'Sessão', prompts: '{n} prompts', tools: 'Ferram.', trend: 'Tendência · {n} turnos', files: 'Ficheiros', uncommitted: '{n} por commitar', clean: 'sem alterações',
@@ -45,7 +45,7 @@ export const BUILT_IN: Record<string, Strings> = {
   fr: {
     context: 'Contexte', h5: '5 heures', d7: '7 jours', spend: 'Dépense', cost: 'Coût', last: 'dernier',
     agents: 'Agents', running: '{n} en cours', idle: 'en attente', compact: 'compacter', compacted: '{n}× compacté',
-    opened: 'Panneau Cabina ouvert.', describe: 'Ouvre le panneau Cabina (config : réglages)',
+    opened: 'Panneau Cabina ouvert.', closed: 'Panneau Cabina fermé.', describe: 'Ouvre le panneau Cabina (config : réglages)',
     settings: 'Réglages', language: 'Langue', theme: 'Thème', auto: 'Automatique', other: 'Autre langue',
     otherHint: 'nom ou code, ex. swahili', close: 'fermer', hint: '↑↓ choisir · Entrée valider · Tab suivant · Échap fermer',
     session: 'Session', prompts: '{n} invites', tools: 'Outils', trend: 'Tendance · {n} tours', files: 'Fichiers', uncommitted: '{n} non commités', clean: 'propre',
@@ -58,7 +58,7 @@ export const BUILT_IN: Record<string, Strings> = {
   de: {
     context: 'Kontext', h5: '5 Std.', d7: '7 Tage', spend: 'Ausgaben', cost: 'Kosten', last: 'zuletzt',
     agents: 'Agenten', running: '{n} aktiv', idle: 'bereit', compact: 'kompaktieren', compacted: '{n}× kompaktiert',
-    opened: 'Cabina-Bereich geöffnet.', describe: 'Öffnet den Cabina-Bereich (config: Einstellungen)',
+    opened: 'Cabina-Bereich geöffnet.', closed: 'Cabina-Bereich geschlossen.', describe: 'Öffnet den Cabina-Bereich (config: Einstellungen)',
     settings: 'Einstellungen', language: 'Sprache', theme: 'Design', auto: 'Automatisch', other: 'Andere Sprache',
     otherHint: 'Name oder Code, z. B. swahili', close: 'schließen', hint: '↑↓ wählen · Enter speichern · Tab weiter · Esc schließen',
     session: 'Sitzung', prompts: '{n} Prompts', tools: 'Tools', trend: 'Verlauf · {n} Runden', files: 'Dateien', uncommitted: '{n} ungesichert', clean: 'sauber',
@@ -71,7 +71,7 @@ export const BUILT_IN: Record<string, Strings> = {
   it: {
     context: 'Contesto', h5: '5 ore', d7: '7 giorni', spend: 'Spesa', cost: 'Costo', last: 'ultimo',
     agents: 'Agenti', running: '{n} in corso', idle: 'in attesa', compact: 'compatta', compacted: '{n}× compattato',
-    opened: 'Pannello Cabina aperto.', describe: 'Apre il pannello Cabina (config: impostazioni)',
+    opened: 'Pannello Cabina aperto.', closed: 'Pannello Cabina chiuso.', describe: 'Apre il pannello Cabina (config: impostazioni)',
     settings: 'Impostazioni', language: 'Lingua', theme: 'Tema', auto: 'Automatico', other: 'Altra lingua',
     otherHint: 'nome o codice, es. swahili', close: 'chiudi', hint: '↑↓ scegli · Invio salva · Tab avanti · Esc chiudi',
     session: 'Sessione', prompts: '{n} prompt', tools: 'Strum.', trend: 'Andamento · {n} turni', files: 'File', uncommitted: '{n} da committare', clean: 'pulito',

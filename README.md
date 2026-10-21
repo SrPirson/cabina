@@ -100,6 +100,7 @@ claude plugin uninstall cabina@cabina
 | Command | Does |
 | --- | --- |
 | `/cabina` | Opens the pane |
+| `/cabina close` | Closes the pane (`/cabina` opens it again) |
 | `/cabina config` | Opens the settings view |
 | `/cabina theme <name>` | Switches theme right away, e.g. `/cabina theme dracula` |
 | `/cabina language <name>` | Sets the language: a code (`es`, `fr`) or any name (`swahili`, `català`) |
