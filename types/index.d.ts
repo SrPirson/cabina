@@ -1,5 +1,18 @@
 export type RateLimit = { kind: string; percentUsed: number; resetsAt?: string }
 
+// Un subagente (o compañero de equipo) de la sesión y lo que lleva gastado.
+export type AgentStat = {
+  id: string
+  type: string
+  desc: string
+  parentId?: string
+  tokens: number
+  out: number
+  tools: number
+  startedAt: number
+  endedAt?: number
+}
+
 export type Snapshot = {
   model: string
   effort?: string
@@ -12,6 +25,7 @@ export type Snapshot = {
   busySince?: number
   tool?: string
   agents: string[]
+  crew: AgentStat[]
   lastTurn?: { durationMs: number; costUsd: number }
   cwd: string
   branch?: string
@@ -39,7 +53,7 @@ export type Strings = {
   session: string; prompts: string; tools: string; trend: string; files: string; uncommitted: string; clean: string
   background: string; bgAuto: string; bgDark: string; bgLight: string
   secUsage: string; secCost: string; secActivity: string; secProject: string; total: string; duration: string; edited: string
-  sections: string; secTrend: string
+  sections: string; secTrend: string; secAgents: string
   tClassic: string; tColorblind: string; tContrast: string; tMono: string
   updated: string
 }

@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { prettyModel, relPath, shortPath, shortstat, spark, span, tokens } from '../hooks/register'
+import { agentUsage, prettyModel, relPath, shortPath, shortstat, spark, span, tokens } from '../hooks/register'
 import { themeOf, toneOf } from '../hooks/themes'
 
 test('formatos', async () => {
@@ -93,4 +93,10 @@ test('cambiar de modelo con /model o de esfuerzo con /effort se ve en el panel s
   expect(await ui.find({ type: 'Text', text: /^Sonnet 5\.5$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: ' · low' })).toBeDefined()
   await ui.unmount()
+})
+
+test('consumo de un subagente', async () => {
+  const a = { id: 'a1', type: 'Explore', desc: 'x', tokens: 56_400, out: 3_000, tools: 4, startedAt: 8_000 }
+  expect(agentUsage(a, 30_000)).toBe('56k · ↓ 3k · 22s')
+  expect(agentUsage({ ...a, endedAt: 20_000 }, 30_000)).toBe('56k · ↓ 3k · 12s')
 })

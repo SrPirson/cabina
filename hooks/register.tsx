@@ -1,13 +1,13 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Snapshot, Strings } from '../types'
+import type { AgentStat, Snapshot, Strings } from '../types'
 import { BUILT_IN, ENDONYM, fill, normalize, parseStrings, translatePrompt } from './i18n'
 import { BACKGROUNDS, isThemeId, surfaceOf, THEME_IDS, themeName, themeOf, toneOf } from './themes'
 
 const PANE = 'cabina'
 const EMPTY: Snapshot = {
-  model: '', ctxWindow: 0, limits: [], compactions: 0, agents: [], cwd: '', now: 0,
+  model: '', ctxWindow: 0, limits: [], compactions: 0, agents: [], crew: [], cwd: '', now: 0,
   files: [], tools: {}, prompts: 0, ctxTrend: [], costTrend: [],
 }
 const snap = atom({ plugin: 'cabina', key: 'snap' } as const, EMPTY)
@@ -47,6 +47,14 @@ export const shortstat = (out: string) => ({
   plus: Number(/(\d+) insertion/.exec(out)?.[1] ?? 0),
   minus: Number(/(\d+) deletion/.exec(out)?.[1] ?? 0),
 })
+
+// Cambia un subagente de la lista por id; si no está, nada.
+const touchAgent = ($: EngineInterface, id: string, fn: (a: AgentStat) => AgentStat) =>
+  bump($, s => ({ ...s, crew: s.crew.map(a => a.id === id ? fn(a) : a) }))
+
+// Contexto de su última petición · salida sumada · tiempo (hasta ahora si sigue en curso).
+export const agentUsage = (a: AgentStat, now: number) =>
+  `${tokens(a.tokens)} · ↓ ${tokens(a.out)} · ${span((a.endedAt ?? now) - a.startedAt)}`
 
 const pushTrend = (list: number[], v: number) => [...list, v].slice(-30)
 
@@ -195,7 +203,7 @@ export const register: Register = (on, options) => {
   const themeId = String(options.theme ?? 'classic')
   const background = String(options.background ?? 'auto')
   // Apartados que el usuario quiere ver (userConfig show_<id>, todos por defecto).
-  const SECTION_IDS = ['usage', 'cost', 'activity', 'trend', 'files', 'project'] as const
+  const SECTION_IDS = ['usage', 'cost', 'activity', 'agents', 'trend', 'files', 'project'] as const
   const visible = Object.fromEntries(SECTION_IDS.map(id => [id, options[`show_${id}`] !== false])) as
     Record<(typeof SECTION_IDS)[number], boolean>
   const surface = surfaceOf(themeId, background)
@@ -220,7 +228,8 @@ export const register: Register = (on, options) => {
     $.clock.every(1000, async () => {
       tick++
       const s = await readSnap($)
-      if (s.busySince !== undefined || tick % 30 === 0) await patch($, { now: await $.clock.now() })
+      const live = s.busySince !== undefined || s.crew.some(a => a.endedAt === undefined)
+      if (live || tick % 30 === 0) await patch($, { now: await $.clock.now() })
     })
     void $.ui.open({ id: PANE, title: 'Cabina' })
 
@@ -283,7 +292,18 @@ export const register: Register = (on, options) => {
   on('turn.start', async ($, e, next) => {
     if (e.agentId !== undefined) {
       const id = e.agentId
+      const now = await $.clock.now()
       await bump($, s => ({ ...s, agents: s.agents.includes(id) ? s.agents : [...s.agents, id] }))
+      if ((await readSnap($)).crew.some(a => a.id === id)) {
+        await touchAgent($, id, a => ({ ...a, endedAt: undefined }))
+      } else {
+        const info = (await $.agent.list().catch(() => [])).find(a => a.id === id)
+        const stat: AgentStat = {
+          id, type: info?.type ?? 'agent', desc: info?.description ?? '', parentId: info?.parentId,
+          tokens: 0, out: 0, tools: 0, startedAt: now,
+        }
+        await bump($, s => ({ ...s, crew: [...s.crew.filter(a => a.id !== id), stat].slice(-20) }))
+      }
     } else {
       // En el estado y no en una variable: una recarga del mod a mitad de turno no lo pierde.
       const turnCostStart = (await readSnap($)).costUsd ?? 0
@@ -295,8 +315,16 @@ export const register: Register = (on, options) => {
   on('turn.step', async function* ($, e, next) {
     if (e.agentId === undefined) {
       await patch($, { model: e.model, effort: e.effort === undefined ? undefined : String(e.effort) })
+      return yield* next(e)
     }
-    return yield* next(e)
+    const r = yield* next(e)
+    // Tokens como los cuenta Claude Code: el contexto de la última petición; la salida, sumada.
+    const u = r.usage
+    if (u) {
+      const ctx = u.input_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens + u.output_tokens
+      await touchAgent($, e.agentId, a => ({ ...a, tokens: ctx, out: a.out + u.output_tokens }))
+    }
+    return r
   })
 
   on('tool.call', async ($, e, next) => {
@@ -310,6 +338,7 @@ export const register: Register = (on, options) => {
         : 'notebook_path' in e && typeof e.notebook_path === 'string' ? e.notebook_path : undefined
       const isWrite = tool === 'Edit' || tool === 'Write' || tool === 'NotebookEdit'
       const wrote = isWrite && file !== undefined && !('deny' in ran && ran.deny) && !ran.isError
+      if (tool && e.agentId !== undefined) await touchAgent($, e.agentId, a => ({ ...a, tools: a.tools + 1 }))
       if (tool) {
         await bump($, s => ({
           ...s,
@@ -327,7 +356,9 @@ export const register: Register = (on, options) => {
     const ran = await next(e)
     if (e.agentId !== undefined) {
       const id = e.agentId
+      const now = await $.clock.now()
       await bump($, s => ({ ...s, agents: s.agents.filter(a => a !== id) }))
+      await touchAgent($, id, a => ({ ...a, endedAt: now }))
       return ran
     }
     const u = await refreshUsage($)
@@ -369,7 +400,7 @@ export const register: Register = (on, options) => {
       ]
       const themes = THEME_IDS.map(id => ({ value: id, label: themeName(t, id) }))
       const snapMode = await readSnap($)
-      const sectionName = { usage: t.secUsage, cost: t.secCost, activity: t.secActivity, trend: t.secTrend, files: t.files, project: t.secProject }
+      const sectionName = { usage: t.secUsage, cost: t.secCost, activity: t.secActivity, agents: t.secAgents, trend: t.secTrend, files: t.files, project: t.secProject }
       // Elegir un apartado lo muestra u oculta; la marca dice cómo está ahora.
       const sections = SECTION_IDS.map(id => ({ value: id, label: `${visible[id] ? '✓' : '○'} ${sectionName[id]}` }))
       const toggle = (id: string) => {
@@ -532,7 +563,10 @@ export const register: Register = (on, options) => {
     const files = s.files.slice(0, 4)
     const topTools = Object.entries(s.tools).sort((a, b) => b[1] - a[1]).slice(0, 3)
     const trendLen = Math.min(s.ctxTrend.length, barWidth + 8)
+    // Los más recientes; con poco sitio, los que no caben se cuentan en la cabecera.
+    const crew = s.crew.slice(-6)
     const wanted = {
+      agents: crew.length ? 1 + crew.length : 0,
       files: files.length ? 2 + files.length : 0,
       activity: s.startedAt !== undefined ? 3 + (topTools.length ? 1 : 0) + (s.agents.length ? 1 : 0) : 0,
       trend: trendLen >= 3 ? 4 : 0,
@@ -546,6 +580,7 @@ export const register: Register = (on, options) => {
     const show = {
       files: visible.files && fits(wanted.files),
       activity: visible.activity && fits(wanted.activity),
+      agents: visible.agents && fits(wanted.agents),
       trend: visible.trend && fits(wanted.trend),
     }
 
@@ -639,6 +674,29 @@ export const register: Register = (on, options) => {
             {s.agents.length > 0 && row(t.agents, (
               <Text color={theme.accent}>{fill(t.running, s.agents.length)}</Text>
             ))}
+          </Box>
+        )}
+
+        {show.agents && (
+          <Box flexDirection="column">
+            {section(t.secAgents, `${s.crew.length} · ↓ ${tokens(s.crew.reduce((n, a) => n + a.out, 0))}`)}
+            {crew.map(a => {
+              const running = a.endedAt === undefined
+              const nested = a.parentId !== undefined && s.crew.some(p => p.id === a.parentId)
+              return (
+                <Box key={a.id} flexDirection="row" justifyContent="space-between" gap={1}>
+                  <Box flexShrink={1}>
+                    <Text color={fg} wrap="truncate">
+                      <Text color={running ? theme.accent : muted}>{nested ? '└ ' : '● '}</Text>
+                      <Text color={fg}>{a.desc || a.type}</Text>
+                    </Text>
+                  </Box>
+                  <Box flexShrink={0}>
+                    <Text {...dim}>{agentUsage(a, s.now)}</Text>
+                  </Box>
+                </Box>
+              )
+            })}
           </Box>
         )}
 

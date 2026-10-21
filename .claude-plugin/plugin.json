@@ -60,6 +60,12 @@
       "description": "Show this section of the pane",
       "default": true
     },
+    "show_agents": {
+      "type": "boolean",
+      "title": "Mostrar Agentes / Agents",
+      "description": "Show this section of the pane",
+      "default": true
+    },
     "show_files": {
       "type": "boolean",
       "title": "Mostrar Archivos / Files",

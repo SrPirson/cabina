@@ -129,7 +129,7 @@ Abre **⚙ Ajustes** al pie del panel o escribe `/cabina config`. Cada cambio se
 | Otro idioma | cualquier nombre o código de idioma, con `custom` | — |
 | Tema | ver [Temas](#temas) | `classic` |
 | Fondo | `auto` (terminal), `dark`, `light` | `auto` |
-| Apartados | Consumo, Coste, Actividad, Tendencia, Archivos, Proyecto: cada uno sí/no | todos |
+| Apartados | Consumo, Coste, Actividad, Agentes, Tendencia, Archivos, Proyecto: cada uno sí/no | todos |
 
 Las mismas opciones están en `/config`, o en `~/.claude/settings.json`:
 
