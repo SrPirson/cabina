@@ -73,8 +73,9 @@ test('con fondo claro el panel se pinta y el texto pasa a oscuro', { options: { 
   await ui.unmount()
 })
 
-test('cambiar de modelo con /model se ve en el panel sin esperar al siguiente turno', async ($, on) => {
+test('cambiar de modelo con /model o de esfuerzo con /effort se ve en el panel sin esperar al siguiente turno', async ($, on) => {
   on('session.model', async () => ({ value: 'claude-sonnet-5-5' }))
+  on('settings.read', async () => ({ value: { modelSettings: { 'claude-sonnet-5-5': { effortLevel: 'low' } } } }))
   const ui = await $.ui.mount({
     plugin: 'cabina',
     component: 'Pane',
@@ -90,5 +91,6 @@ test('cambiar de modelo con /model se ve en el panel sin esperar al siguiente tu
     },
   })
   expect(await ui.find({ type: 'Text', text: /^Sonnet 5\.5$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' · low' })).toBeDefined()
   await ui.unmount()
 })

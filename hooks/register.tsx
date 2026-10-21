@@ -407,6 +407,11 @@ export const register: Register = (on, options) => {
     // /model no abre turno, y classic.PostModelSwitch no llega aquí en cuentas
     // con ajustes gestionados (cc-plugin-sec-default se lo queda): se lee en vivo.
     const liveModel = await $.session.model().catch(() => s.model)
+    // /effort tampoco abre turno; lo guarda por modelo en modelSettings.<id>.effortLevel.
+    const settings = await $.settings.read({}).catch(() => undefined)
+    const perModel = (settings?.modelSettings as Record<string, { effortLevel?: unknown }> | undefined)?.[liveModel.replace(/\[.*\]$/, '')]
+    const liveEffort = perModel?.effortLevel !== undefined ? String(perModel.effortLevel)
+      : liveModel === s.model ? s.effort : undefined
     const fg = surface?.fg
     const muted = surface?.muted ?? 'inactive'
     // Texto secundario: gris con contraste medido sobre un fondo pintado; atenuado sobre el de la terminal.
@@ -499,7 +504,7 @@ export const register: Register = (on, options) => {
           <Text color={fg} wrap="truncate">
             <Text color={busy ? theme.accent : muted}>● </Text>
             <Text color={fg} bold>{prettyModel(liveModel) || '—'}</Text>
-            {s.effort && <Text {...dim}>{` · ${s.effort}`}</Text>}
+            {liveEffort && <Text {...dim}>{` · ${liveEffort}`}</Text>}
           </Text>
           <Text color={busy ? theme.accent : muted}>{status}</Text>
         </Box>
