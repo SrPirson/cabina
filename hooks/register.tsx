@@ -243,6 +243,12 @@ export const register: Register = (on, options) => {
     return yield* next(e)
   })
 
+  // /model no abre turno: sin esto el panel esperaría al siguiente mensaje.
+  on('classic.PostModelSwitch', async ($, e, next) => {
+    await patch($, { model: e.to_model })
+    return next(e)
+  })
+
   on('tool.call', async ($, e, next) => {
     const tool = 'tool' in e ? e.tool : undefined
     const isMain = e.agentId === undefined
