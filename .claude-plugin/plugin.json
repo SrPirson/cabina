@@ -1,6 +1,6 @@
 {
   "name": "cabina",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "A clean side pane for Claude Code: model, context, rate limits, cost, activity and project at a glance. Themes, light/dark backgrounds and any language.",
   "author": { "name": "SrPirson", "url": "https://github.com/SrPirson" },
   "homepage": "https://github.com/SrPirson/cabina",

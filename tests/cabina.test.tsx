@@ -74,11 +74,7 @@ test('con fondo claro el panel se pinta y el texto pasa a oscuro', { options: { 
 })
 
 test('cambiar de modelo con /model se ve en el panel sin esperar al siguiente turno', async ($, on) => {
-  on('classic.PostModelSwitch', async () => ({}))
-  await $.classic.PostModelSwitch({
-    hook_event_name: 'PostModelSwitch', from_model: 'claude-opus-5-5', to_model: 'claude-sonnet-5-5',
-    requested_model: 'sonnet', source: 'picker', context_tokens: 0, prompt_cache_warm: false,
-  } as never)
+  on('session.model', async () => ({ value: 'claude-sonnet-5-5' }))
   const ui = await $.ui.mount({
     plugin: 'cabina',
     component: 'Pane',
