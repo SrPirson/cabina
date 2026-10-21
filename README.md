@@ -5,7 +5,7 @@
 <p align="center"><strong>A clean side pane for Claude Code: everything your session is doing, at a glance.</strong></p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.0.3-d97757?style=for-the-badge" alt="Version 1.0.3">
+  <img src="https://img.shields.io/badge/version-1.0.4-d97757?style=for-the-badge" alt="Version 1.0.4">
   <img src="https://img.shields.io/badge/Claude%20Code-2.1.304%2B-d97757?style=for-the-badge" alt="Claude Code 2.1.304 or later">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3fb950?style=for-the-badge" alt="MIT License"></a>
 </p>
