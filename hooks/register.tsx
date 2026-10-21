@@ -138,6 +138,56 @@ const gitInfo = async ($: EngineInterface, cwd: string): Promise<Partial<Snapsho
   return { branch, git: { changed, ...shortstat((await git($, cwd, ['diff', 'HEAD', '--shortstat'])) ?? '') } }
 }
 
+// "1.0.10" > "1.0.9": compara número a número; lo que no sea número cuenta como 0.
+export const isNewer = (latest: string, current: string) => {
+  const a = latest.split('.').map(Number), b = current.split('.').map(Number)
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const d = (a[i] || 0) - (b[i] || 0)
+    if (d) return d > 0
+  }
+  return false
+}
+
+const MANIFEST_URL = 'https://raw.githubusercontent.com/SrPirson/cabina/main/.claude-plugin/plugin.json'
+const versionOf = (json: string) => {
+  const v = (JSON.parse(json) as { version?: unknown }).version
+  return typeof v === 'string' ? v : undefined
+}
+
+// Versión instalada y la publicada en GitHub; sin red, solo la instalada.
+const checkVersion = async ($: EngineInterface) => {
+  const version = await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`).then(versionOf).catch(() => undefined)
+  const r = await $.http.fetch(MANIFEST_URL).catch(() => undefined)
+  const latest = r?.ok ? (() => { try { return versionOf(r.text) } catch { return undefined } })() : undefined
+  await patch($, { version, latest, updating: undefined })
+}
+
+// "cabina@<marketplace>" si se instaló desde un marketplace; con --plugin-dir (@inline) no hay nada que actualizar.
+const installedId = async ($: EngineInterface) => {
+  const key = (await $.config.list()).find(r => /^cabina@[^.]+\.theme$/.test(r.key))?.key
+  const id = key?.slice(0, -'.theme'.length)
+  return id && !id.endsWith('@inline') ? id : undefined
+}
+
+// Lo mismo que "Update" del README; el motor aplica la versión nueva al reiniciar.
+const runUpdate = async ($: EngineInterface) => {
+  const s = await readSnap($)
+  const id = await installedId($)
+  if (!id || s.updating) return
+  await patch($, { updating: 'running' })
+  const run = (args: string[]) => $.process.run(['claude', 'plugin', ...args], { timeoutMs: 120_000 })
+  try {
+    const m = await run(['marketplace', 'update', id.split('@')[1]!])
+    const r = m.exitCode === 0 ? await run(['update', id]) : m
+    if (r.exitCode !== 0) throw new Error((r.stderr || r.stdout).trim().split('\n').pop())
+    await patch($, { updating: 'done' })
+    void $.ui.toast(fill((await read($, text)).updated, s.latest ?? ''))
+  } catch (err) {
+    await patch($, { updating: undefined })
+    void $.ui.toast(`Cabina: ${err instanceof Error ? err.message : String(err)}`)
+  }
+}
+
 export const register: Register = (on, options) => {
   const langOption = String(options.language ?? 'auto')
   const customLanguage = String(options.customLanguage ?? '')
@@ -151,6 +201,7 @@ export const register: Register = (on, options) => {
   const surface = surfaceOf(themeId, background)
 
   on('session.start', async ($, e, next) => {
+    void checkVersion($).catch(() => undefined)
     const known = BUILT_IN[normalize(setting)]
     await $.command.register({ name: 'cabina', description: (known ?? BUILT_IN.en!).describe, argumentHint: '[config | theme <…> | language <…> | background <…> | help]' })
     void resolveStrings($, setting)
@@ -497,6 +548,23 @@ export const register: Register = (on, options) => {
     const perHour = s.costUsd !== undefined && elapsed > 5 * 60_000 ? s.costUsd / (elapsed / 3_600_000) : undefined
     const costMax = Math.max(...s.costTrend.slice(-trendLen), 0)
 
+    // Esquina de ajustes: la versión, discreta; si hay una más nueva, un botón que la instala.
+    const hasUpdate = s.version !== undefined && s.latest !== undefined && isNewer(s.latest, s.version)
+    const corner = (
+      <Box flexDirection="row" gap={1} flexShrink={0}>
+        {hasUpdate && !s.updating ? (
+          <Button key="update" plain onPress={() => void runUpdate($)}>
+            <Text color={theme.accent} bold>{`↑ v${s.latest}`}</Text>
+          </Button>
+        ) : s.version && (
+          <Text {...dim}>{hasUpdate ? `${s.updating === 'done' ? '✓' : '↻'} v${s.latest}` : `v${s.version}`}</Text>
+        )}
+        <Button key="settings" plain onPress={() => void openSettings($)}>
+          <Text {...dim}>{`⚙ ${t.settings}`}</Text>
+        </Button>
+      </Box>
+    )
+
     return (
       <Box flexDirection="column" gap={1} backgroundColor={surface?.bg} paddingX={surface ? 1 : 0}
         minHeight={surface ? e.props.scroll.bodyRows : undefined}>
@@ -603,9 +671,7 @@ export const register: Register = (on, options) => {
                 {s.branch && <Text color={theme.branch}>{`  ⎇ ${s.branch}`}</Text>}
               </Text>
             </Box>
-            <Button key="settings" plain onPress={() => void openSettings($)}>
-              <Text {...dim}>{`⚙ ${t.settings}`}</Text>
-            </Button>
+            {corner}
           </Box>
           {hasChanges && s.git && (
             <Text color={fg} wrap="truncate">
@@ -616,11 +682,7 @@ export const register: Register = (on, options) => {
           )}
         </Box> : (
           // Sin «Proyecto», el botón de ajustes se queda solo: siempre hay forma de volver.
-          <Box flexDirection="row" justifyContent="flex-end">
-            <Button key="settings" plain onPress={() => void openSettings($)}>
-              <Text {...dim}>{`⚙ ${t.settings}`}</Text>
-            </Button>
-          </Box>
+          <Box flexDirection="row" justifyContent="flex-end">{corner}</Box>
         )}
       </Box>
     )

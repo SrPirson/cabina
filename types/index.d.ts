@@ -25,6 +25,9 @@ export type Snapshot = {
   termLight?: boolean
   turnCostStart?: number
   schema?: number
+  version?: string
+  latest?: string
+  updating?: 'running' | 'done'
   now: number
 }
 
@@ -38,6 +41,7 @@ export type Strings = {
   secUsage: string; secCost: string; secActivity: string; secProject: string; total: string; duration: string; edited: string
   sections: string; secTrend: string
   tClassic: string; tColorblind: string; tContrast: string; tMono: string
+  updated: string
 }
 
 declare module 'claude-code' {

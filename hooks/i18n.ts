@@ -11,6 +11,7 @@ const en: Strings = {
   secUsage: 'Usage', secCost: 'Cost', secActivity: 'Activity', secProject: 'Project', total: 'Total', duration: 'Duration', edited: '{n} edited',
   sections: 'Sections', secTrend: 'Trend',
   tClassic: 'Classic', tColorblind: 'Colour-blind safe', tContrast: 'High contrast', tMono: 'Monochrome',
+  updated: 'Updated to v{n} · restart Claude Code to apply',
 }
 
 export const BUILT_IN: Record<string, Strings> = {
@@ -26,6 +27,7 @@ export const BUILT_IN: Record<string, Strings> = {
     secUsage: 'Consumo', secCost: 'Coste', secActivity: 'Actividad', secProject: 'Proyecto', total: 'Total', duration: 'Duración', edited: '{n} editados',
     sections: 'Apartados', secTrend: 'Tendencia',
     tClassic: 'Clásico', tColorblind: 'Apto para daltonismo', tContrast: 'Alto contraste', tMono: 'Monocromo',
+    updated: 'Actualizado a v{n} · reinicia Claude Code para aplicarlo',
   },
   pt: {
     context: 'Contexto', h5: '5 horas', d7: '7 dias', spend: 'Gasto', cost: 'Custo', last: 'último',
@@ -38,6 +40,7 @@ export const BUILT_IN: Record<string, Strings> = {
     secUsage: 'Consumo', secCost: 'Custo', secActivity: 'Atividade', secProject: 'Projeto', total: 'Total', duration: 'Duração', edited: '{n} editados',
     sections: 'Secções', secTrend: 'Tendência',
     tClassic: 'Clássico', tColorblind: 'Para daltonismo', tContrast: 'Alto contraste', tMono: 'Monocromático',
+    updated: 'Atualizado para v{n} · reinicie o Claude Code para aplicar',
   },
   fr: {
     context: 'Contexte', h5: '5 heures', d7: '7 jours', spend: 'Dépense', cost: 'Coût', last: 'dernier',
@@ -50,6 +53,7 @@ export const BUILT_IN: Record<string, Strings> = {
     secUsage: 'Consommation', secCost: 'Coût', secActivity: 'Activité', secProject: 'Projet', total: 'Total', duration: 'Durée', edited: '{n} modifiés',
     sections: 'Sections', secTrend: 'Tendance',
     tClassic: 'Classique', tColorblind: 'Adapté au daltonisme', tContrast: 'Contraste élevé', tMono: 'Monochrome',
+    updated: "Mis à jour en v{n} · redémarrez Claude Code pour l'appliquer",
   },
   de: {
     context: 'Kontext', h5: '5 Std.', d7: '7 Tage', spend: 'Ausgaben', cost: 'Kosten', last: 'zuletzt',
@@ -62,6 +66,7 @@ export const BUILT_IN: Record<string, Strings> = {
     secUsage: 'Verbrauch', secCost: 'Kosten', secActivity: 'Aktivität', secProject: 'Projekt', total: 'Gesamt', duration: 'Dauer', edited: '{n} bearbeitet',
     sections: 'Bereiche', secTrend: 'Verlauf',
     tClassic: 'Klassisch', tColorblind: 'Farbenblind-freundlich', tContrast: 'Hoher Kontrast', tMono: 'Monochrom',
+    updated: 'Auf v{n} aktualisiert · Claude Code neu starten',
   },
   it: {
     context: 'Contesto', h5: '5 ore', d7: '7 giorni', spend: 'Spesa', cost: 'Costo', last: 'ultimo',
@@ -74,6 +79,7 @@ export const BUILT_IN: Record<string, Strings> = {
     secUsage: 'Consumo', secCost: 'Costo', secActivity: 'Attività', secProject: 'Progetto', total: 'Totale', duration: 'Durata', edited: '{n} modificati',
     sections: 'Sezioni', secTrend: 'Andamento',
     tClassic: 'Classico', tColorblind: 'Adatto al daltonismo', tContrast: 'Alto contrasto', tMono: 'Monocromatico',
+    updated: 'Aggiornato a v{n} · riavvia Claude Code per applicarlo',
   },
 }
 
@@ -98,7 +104,7 @@ export const normalize = (lang: string) => {
   return ALIASES[l] ?? (BUILT_IN[code] ? code : l)
 }
 
-export const fill = (template: string, n: number) => template.replace('{n}', String(n))
+export const fill = (template: string, n: number | string) => template.replace('{n}', String(n))
 
 // Respuesta del modelo → Strings, o undefined si le falta alguna clave o pierde el {n}.
 export const parseStrings = (text: string): Strings | undefined => {
