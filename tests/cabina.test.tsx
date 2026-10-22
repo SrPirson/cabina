@@ -119,3 +119,34 @@ test('un hook de settings.json aparece en Hooks y marca cuándo bloquea', async 
   expect(await ui.find({ type: 'Text', text: /^blocked · / })).toBeDefined()
   await ui.unmount()
 })
+
+test('si classic.PreToolUse llega a Cabina, el seguimiento en vivo no se apaga', async ($, on) => {
+  const saved: unknown[] = []
+  on('config.list', () => ({ value: [{ key: 'cabina@cabina.track_hooks', label: 'track_hooks' }] }) as never)
+  on('config.set', (_, e) => { saved.push(e); return { value: {} } as never })
+  on('tool.call', () => ({ result: {} }))
+  for (const i of [1, 2, 3]) await $.tool.call({ tool: 'Bash', command: `echo ${i}` })
+  expect(saved).toEqual([])
+})
+
+test('sin seguimiento en vivo, un bloqueo de un hook sí aparece en Hooks', { options: { track_hooks: false } }, async ($, on) => {
+  on('settings.read', async () => ({ value: { hooks: { Stop: [], PreToolUse: [] } } }))
+  on('clock.now', () => ({ value: 1_000 }))
+  const props = {
+    title: 'Cabina', isFocused: false, bodyColumns: 40, placement: 'dock' as const,
+    scroll: { offset: 0, bodyRows: 60 }, view: {},
+  }
+  let ui = await $.ui.mount({ plugin: 'cabina', component: 'Pane', requestId: 'cabina', surface: 'terminal', props })
+  expect(await ui.find({ type: 'Text', text: /^HOOKS$/ })).toBeUndefined()
+  await ui.unmount()
+
+  await $.session.append({
+    message: { type: 'attachment', name: 'hook_blocking_error', content: [{ type: 'text', text: 'falta el changelog' }] },
+    door: 'attachment', origin: { kind: 'hook', event: 'Stop' }, uuid: 'u1',
+  } as never)
+  ui = await $.ui.mount({ plugin: 'cabina', component: 'Pane', requestId: 'cabina', surface: 'terminal', props })
+  expect(await ui.find({ type: 'Text', text: /^HOOKS$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'PreToolUse' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /^blocked · / })).toBeDefined()
+  await ui.unmount()
+})

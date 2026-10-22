@@ -130,6 +130,7 @@ Open **⚙ Settings** at the bottom of the pane, or run `/cabina config`. Every 
 | Theme | see [Themes](#themes) | `classic` |
 | Background | `auto` (terminal), `dark`, `light` | `auto` |
 | Sections | Usage, Cost, Activity, Agents, Hooks, Trend, Files, Project: on/off each | all on |
+| Live hooks | lights up `settings.json` hooks as they run; turns itself off when an organization plugin skips Cabina's hook events, leaving only blocks and added context | on |
 
 The same options appear in `/config`, or in `~/.claude/settings.json`:
 

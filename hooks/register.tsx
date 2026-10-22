@@ -202,6 +202,11 @@ export const HOOK_GLOW = 5000
 export const register: Register = (on, options) => {
   // Eventos con hooks en settings.json (todas las fuentes, la del proyecto incluida); se relee al dibujar.
   let configured = new Set<string>()
+  // Con un plugin gestionado que se salta los classic.* de Cabina, el seguimiento en vivo se apaga solo
+  // (track_hooks en /config): queda lo que los hooks escriben en la conversación, al bloquear o añadir contexto.
+  const trackHooks = options.track_hooks !== false
+  const seenPre = new Set<string>()
+  let misses = 0
   const langOption = String(options.language ?? 'auto')
   const customLanguage = String(options.customLanguage ?? '')
   const setting = langOption === 'custom' ? customLanguage || 'auto' : langOption
@@ -340,6 +345,12 @@ export const register: Register = (on, options) => {
     if (isMain) await patch($, { tool })
     try {
       const ran = await next(e)
+      // Toda llamada que llega a ejecutarse pasa antes por classic.PreToolUse; si nunca nos llega, nos lo saltan.
+      // Tres seguidas, por si alguna llamada no lo dispara (las de $.tool.call de otro plugin).
+      if (trackHooks && misses < 3 && !ran.isError && !('deny' in ran && ran.deny)) {
+        misses = seenPre.delete(e.tool_use_id) ? 0 : misses + 1
+        if (misses === 3) void save($, 'track_hooks', false)
+      }
       // Herramientas usadas (también por subagentes) y archivos que se escribieron bien.
       const file = 'file_path' in e && typeof e.file_path === 'string' ? e.file_path
         : 'notebook_path' in e && typeof e.notebook_path === 'string' ? e.notebook_path : undefined
@@ -395,8 +406,9 @@ export const register: Register = (on, options) => {
   })
 
   // Los hooks de settings van debajo de los módulos en la cadena: lo que tarda next es lo que tardan ellos.
-  on('classic.*', async ($, e, next) => {
+  if (trackHooks) on('classic.*', async ($, e, next) => {
     const event = next.event.slice('classic.'.length)
+    if (event === 'PreToolUse' && 'tool_use_id' in e) seenPre.add(e.tool_use_id)
     if (!configured.has(event)) return next(e)
     const detail = 'tool' in e ? e.tool : 'tool_name' in e ? e.tool_name : undefined
     const mark = async (busy: boolean, blocked = false) => {
@@ -413,6 +425,18 @@ export const register: Register = (on, options) => {
       await mark(false)
       throw err
     }
+  })
+
+  // Lo que un hook de settings devuelve (un bloqueo, contexto) entra en la conversación con su evento.
+  on('session.append', async ($, e, next) => {
+    const ran = await next(e)
+    if (e.origin.kind === 'hook') {
+      const event = e.origin.event
+      const at = await $.clock.now()
+      const blocked = /block|stop|error/i.test(e.message.name ?? '')
+      await bump($, s => ({ ...s, now: at, hooks: { ...s.hooks, [event]: { at, busy: false, blocked, detail: s.hooks[event]?.detail } } }))
+    }
+    return ran
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
@@ -594,7 +618,8 @@ export const register: Register = (on, options) => {
     const trendLen = Math.min(s.ctxTrend.length, barWidth + 8)
     // Los más recientes; con poco sitio, los que no caben se cuentan en la cabecera.
     const crew = s.crew.slice(-6)
-    const hookEvents = [...configured]
+    // Sin seguimiento en vivo, solo los eventos de los que ya llegó algo: los demás se quedarían en gris.
+    const hookEvents = trackHooks ? [...configured] : Object.keys(s.hooks)
     const wanted = {
       agents: crew.length ? 1 + crew.length : 0,
       hooks: hookEvents.length ? 1 + hookEvents.length : 0,

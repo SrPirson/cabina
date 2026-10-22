@@ -36,6 +36,12 @@
       "options": ["auto", "dark", "light"],
       "default": "auto"
     },
+    "track_hooks": {
+      "type": "boolean",
+      "title": "Hooks en vivo / Live hooks",
+      "description": "Light up settings.json hooks as they run; turns itself off when an organization plugin skips Cabina's hook events",
+      "default": true
+    },
     "show_usage": {
       "type": "boolean",
       "title": "Mostrar Consumo / Usage",

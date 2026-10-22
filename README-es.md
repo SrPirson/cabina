@@ -130,6 +130,7 @@ Abre **⚙ Ajustes** al pie del panel o escribe `/cabina config`. Cada cambio se
 | Tema | ver [Temas](#temas) | `classic` |
 | Fondo | `auto` (terminal), `dark`, `light` | `auto` |
 | Apartados | Consumo, Coste, Actividad, Agentes, Hooks, Tendencia, Archivos, Proyecto: cada uno sí/no | todos |
+| Hooks en vivo | enciende los hooks de `settings.json` al ejecutarse; se apaga solo si un plugin de la organización se salta los eventos de Cabina, y quedan solo los bloqueos y el contexto añadido | sí |
 
 Las mismas opciones están en `/config`, o en `~/.claude/settings.json`:
 
