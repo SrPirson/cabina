@@ -13,6 +13,9 @@ export type AgentStat = {
   endedAt?: number
 }
 
+// Último disparo de un evento con hooks en settings.json (PreToolUse, Stop…).
+export type HookStat = { at: number; busy: boolean; blocked: boolean; detail?: string }
+
 export type Snapshot = {
   model: string
   effort?: string
@@ -26,6 +29,7 @@ export type Snapshot = {
   tool?: string
   agents: string[]
   crew: AgentStat[]
+  hooks: Record<string, HookStat>
   lastTurn?: { durationMs: number; costUsd: number }
   cwd: string
   branch?: string
@@ -53,7 +57,7 @@ export type Strings = {
   session: string; prompts: string; tools: string; trend: string; files: string; uncommitted: string; clean: string
   background: string; bgAuto: string; bgDark: string; bgLight: string
   secUsage: string; secCost: string; secActivity: string; secProject: string; total: string; duration: string; edited: string
-  sections: string; secTrend: string; secAgents: string
+  sections: string; secTrend: string; secAgents: string; secHooks: string; blocked: string; ago: string
   tClassic: string; tColorblind: string; tContrast: string; tMono: string
   updated: string
 }

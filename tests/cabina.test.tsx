@@ -100,3 +100,22 @@ test('consumo de un subagente', async () => {
   expect(agentUsage(a, 30_000)).toBe('56k · ↓ 3k · 22s')
   expect(agentUsage({ ...a, endedAt: 20_000 }, 30_000)).toBe('56k · ↓ 3k · 12s')
 })
+
+test('un hook de settings.json aparece en Hooks y marca cuándo bloquea', async ($, on) => {
+  on('settings.read', async () => ({ value: { hooks: { Stop: [], PreToolUse: [] } } }))
+  on('classic.Stop', async () => ({ block: 'falta el changelog' }))
+  on('clock.now', () => ({ value: 1_000 }))
+  const props = {
+    title: 'Cabina', isFocused: false, bodyColumns: 40, placement: 'dock' as const,
+    scroll: { offset: 0, bodyRows: 60 }, view: {},
+  }
+  let ui = await $.ui.mount({ plugin: 'cabina', component: 'Pane', requestId: 'cabina', surface: 'terminal', props })
+  expect(await ui.find({ type: 'Text', text: /^HOOKS$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'PreToolUse' })).toBeDefined()
+  await ui.unmount()
+
+  await $.classic.Stop({ stop_hook_active: false })
+  ui = await $.ui.mount({ plugin: 'cabina', component: 'Pane', requestId: 'cabina', surface: 'terminal', props })
+  expect(await ui.find({ type: 'Text', text: /^blocked · / })).toBeDefined()
+  await ui.unmount()
+})

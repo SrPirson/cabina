@@ -66,6 +66,12 @@
       "description": "Show this section of the pane",
       "default": true
     },
+    "show_hooks": {
+      "type": "boolean",
+      "title": "Mostrar Hooks",
+      "description": "Show this section of the pane",
+      "default": true
+    },
     "show_files": {
       "type": "boolean",
       "title": "Mostrar Archivos / Files",

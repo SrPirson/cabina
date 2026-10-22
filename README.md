@@ -129,7 +129,7 @@ Open **⚙ Settings** at the bottom of the pane, or run `/cabina config`. Every 
 | Other language | any language name or code, used with `custom` | — |
 | Theme | see [Themes](#themes) | `classic` |
 | Background | `auto` (terminal), `dark`, `light` | `auto` |
-| Sections | Usage, Cost, Activity, Agents, Trend, Files, Project: on/off each | all on |
+| Sections | Usage, Cost, Activity, Agents, Hooks, Trend, Files, Project: on/off each | all on |
 
 The same options appear in `/config`, or in `~/.claude/settings.json`:
 

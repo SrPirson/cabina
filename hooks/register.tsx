@@ -7,7 +7,7 @@ import { BACKGROUNDS, isThemeId, surfaceOf, THEME_IDS, themeName, themeOf, toneO
 
 const PANE = 'cabina'
 const EMPTY: Snapshot = {
-  model: '', ctxWindow: 0, limits: [], compactions: 0, agents: [], crew: [], cwd: '', now: 0,
+  model: '', ctxWindow: 0, limits: [], compactions: 0, agents: [], crew: [], hooks: {}, cwd: '', now: 0,
   files: [], tools: {}, prompts: 0, ctxTrend: [], costTrend: [],
 }
 const snap = atom({ plugin: 'cabina', key: 'snap' } as const, EMPTY)
@@ -73,7 +73,7 @@ const resolveStrings = async ($: EngineInterface, setting: string): Promise<Stri
   const code = normalize(lang)
   const built = BUILT_IN[code]
   if (built) return built
-  const key = `i18n:v3:${code}`
+  const key = `i18n:v4:${code}`
   const cached = parseStrings(JSON.stringify((await $.store.get(key)) ?? null))
   if (cached) return cached
   const r = await $.model.complete({ model: 'haiku', prompt: translatePrompt(lang), maxTokens: 800 })
@@ -196,14 +196,19 @@ const runUpdate = async ($: EngineInterface) => {
   }
 }
 
+// Un hook se ve en verde mientras corre y unos segundos después: los de settings suelen durar milisegundos.
+export const HOOK_GLOW = 5000
+
 export const register: Register = (on, options) => {
+  // Eventos con hooks en settings.json (todas las fuentes, la del proyecto incluida); se relee al dibujar.
+  let configured = new Set<string>()
   const langOption = String(options.language ?? 'auto')
   const customLanguage = String(options.customLanguage ?? '')
   const setting = langOption === 'custom' ? customLanguage || 'auto' : langOption
   const themeId = String(options.theme ?? 'classic')
   const background = String(options.background ?? 'auto')
   // Apartados que el usuario quiere ver (userConfig show_<id>, todos por defecto).
-  const SECTION_IDS = ['usage', 'cost', 'activity', 'agents', 'trend', 'files', 'project'] as const
+  const SECTION_IDS = ['usage', 'cost', 'activity', 'agents', 'hooks', 'trend', 'files', 'project'] as const
   const visible = Object.fromEntries(SECTION_IDS.map(id => [id, options[`show_${id}`] !== false])) as
     Record<(typeof SECTION_IDS)[number], boolean>
   const surface = surfaceOf(themeId, background)
@@ -216,6 +221,7 @@ export const register: Register = (on, options) => {
       .then(t => update($, text, () => t))
       .catch(() => undefined)
     const cwd = await $.session.cwd()
+    configured = new Set(Object.keys((await $.settings.read({ key: 'hooks' }).catch(() => undefined)) ?? {}))
     const claudeTheme = await $.settings.read({ key: 'theme' }).catch(() => undefined)
     await patch($, { model: await $.session.model(), cwd, ...(await gitInfo($, cwd)), prompts: await $.session.turns(), termLight: typeof claudeTheme === 'string' && claudeTheme.startsWith('light'), now: await $.clock.now() })
     await refreshUsage($)
@@ -229,6 +235,7 @@ export const register: Register = (on, options) => {
       tick++
       const s = await readSnap($)
       const live = s.busySince !== undefined || s.crew.some(a => a.endedAt === undefined)
+        || Object.values(s.hooks).some(h => h.busy || s.now - h.at < 60_000)
       if (live || tick % 30 === 0) await patch($, { now: await $.clock.now() })
     })
     void $.ui.open({ id: PANE, title: 'Cabina' })
@@ -387,6 +394,27 @@ export const register: Register = (on, options) => {
     return ran
   })
 
+  // Los hooks de settings van debajo de los módulos en la cadena: lo que tarda next es lo que tardan ellos.
+  on('classic.*', async ($, e, next) => {
+    const event = next.event.slice('classic.'.length)
+    if (!configured.has(event)) return next(e)
+    const detail = 'tool' in e ? e.tool : 'tool_name' in e ? e.tool_name : undefined
+    const mark = async (busy: boolean, blocked = false) => {
+      const at = await $.clock.now()
+      await bump($, s => ({ ...s, now: at, hooks: { ...s.hooks, [event]: { at, busy, blocked, detail } } }))
+    }
+    await mark(true)
+    try {
+      const ran = await next(e)
+      const r = ran as { block?: string; deny?: string } | undefined
+      await mark(false, Boolean(r?.block || r?.deny))
+      return ran
+    } catch (err) {
+      await mark(false)
+      throw err
+    }
+  })
+
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     // Ajustes: otra vista del mismo panel. Un segundo panel se abría como pestaña oculta.
     if ((await read($, view)) === 'settings') {
@@ -400,7 +428,7 @@ export const register: Register = (on, options) => {
       ]
       const themes = THEME_IDS.map(id => ({ value: id, label: themeName(t, id) }))
       const snapMode = await readSnap($)
-      const sectionName = { usage: t.secUsage, cost: t.secCost, activity: t.secActivity, agents: t.secAgents, trend: t.secTrend, files: t.files, project: t.secProject }
+      const sectionName = { usage: t.secUsage, cost: t.secCost, activity: t.secActivity, agents: t.secAgents, hooks: t.secHooks, trend: t.secTrend, files: t.files, project: t.secProject }
       // Elegir un apartado lo muestra u oculta; la marca dice cómo está ahora.
       const sections = SECTION_IDS.map(id => ({ value: id, label: `${visible[id] ? '✓' : '○'} ${sectionName[id]}` }))
       const toggle = (id: string) => {
@@ -496,6 +524,7 @@ export const register: Register = (on, options) => {
     const liveModel = await $.session.model().catch(() => s.model)
     // /effort tampoco abre turno; lo guarda por modelo en modelSettings.<id>.effortLevel.
     const settings = await $.settings.read({}).catch(() => undefined)
+    if (settings) configured = new Set(Object.keys(settings.hooks ?? {}))
     const perModel = (settings?.modelSettings as Record<string, { effortLevel?: unknown }> | undefined)?.[liveModel.replace(/\[.*\]$/, '')]
     const liveEffort = perModel?.effortLevel !== undefined ? String(perModel.effortLevel)
       : liveModel === s.model ? s.effort : undefined
@@ -565,8 +594,10 @@ export const register: Register = (on, options) => {
     const trendLen = Math.min(s.ctxTrend.length, barWidth + 8)
     // Los más recientes; con poco sitio, los que no caben se cuentan en la cabecera.
     const crew = s.crew.slice(-6)
+    const hookEvents = [...configured]
     const wanted = {
       agents: crew.length ? 1 + crew.length : 0,
+      hooks: hookEvents.length ? 1 + hookEvents.length : 0,
       files: files.length ? 2 + files.length : 0,
       activity: s.startedAt !== undefined ? 3 + (topTools.length ? 1 : 0) + (s.agents.length ? 1 : 0) : 0,
       trend: trendLen >= 3 ? 4 : 0,
@@ -581,6 +612,7 @@ export const register: Register = (on, options) => {
       files: visible.files && fits(wanted.files),
       activity: visible.activity && fits(wanted.activity),
       agents: visible.agents && fits(wanted.agents),
+      hooks: visible.hooks && fits(wanted.hooks),
       trend: visible.trend && fits(wanted.trend),
     }
 
@@ -687,12 +719,37 @@ export const register: Register = (on, options) => {
                 <Box key={a.id} flexDirection="row" justifyContent="space-between" gap={1}>
                   <Box flexShrink={1}>
                     <Text color={fg} wrap="truncate">
-                      <Text color={running ? theme.accent : muted}>{nested ? '└ ' : '● '}</Text>
+                      <Text color={running ? theme.ok : theme.danger}>{nested ? '└ ' : '● '}</Text>
                       <Text color={fg}>{a.desc || a.type}</Text>
                     </Text>
                   </Box>
                   <Box flexShrink={0}>
                     <Text {...dim}>{agentUsage(a, s.now)}</Text>
+                  </Box>
+                </Box>
+              )
+            })}
+          </Box>
+        )}
+
+        {show.hooks && (
+          <Box flexDirection="column">
+            {section(t.secHooks, `${hookEvents.length}`)}
+            {hookEvents.map(name => {
+              const hook = s.hooks[name]
+              const lit = hook !== undefined && (hook.busy || s.now - hook.at < HOOK_GLOW)
+              const state = !hook ? '—' : hook.busy ? '…' : `${hook.blocked ? `${t.blocked} · ` : ''}${fill(t.ago, span(s.now - hook.at))}`
+              return (
+                <Box key={name} flexDirection="row" justifyContent="space-between" gap={1}>
+                  <Box flexShrink={1}>
+                    <Text color={fg} wrap="truncate">
+                      <Text color={hook?.blocked ? theme.danger : lit ? theme.ok : muted}>● </Text>
+                      <Text color={fg}>{name}</Text>
+                      {hook?.detail && <Text {...dim}>{` · ${hook.detail}`}</Text>}
+                    </Text>
+                  </Box>
+                  <Box flexShrink={0}>
+                    <Text {...dim}>{state}</Text>
                   </Box>
                 </Box>
               )
