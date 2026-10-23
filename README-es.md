@@ -5,7 +5,7 @@
 <p align="center"><strong>Un panel lateral limpio para Claude Code: todo lo que hace tu sesión, de un vistazo.</strong></p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/versi%C3%B3n-1.0.7-d97757?style=for-the-badge" alt="Versión 1.0.7">
+  <img src="https://img.shields.io/badge/versi%C3%B3n-1.0.8-d97757?style=for-the-badge" alt="Versión 1.0.8">
   <img src="https://img.shields.io/badge/Claude%20Code-2.1.304%2B-d97757?style=for-the-badge" alt="Claude Code 2.1.304 o posterior">
   <a href="LICENSE"><img src="https://img.shields.io/badge/licencia-MIT-3fb950?style=for-the-badge" alt="Licencia MIT"></a>
 </p>
