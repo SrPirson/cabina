@@ -48,6 +48,7 @@ Cabina docks a pane beside the conversation that keeps the numbers you usually g
 - **Usage**: context window, 5‑hour and 7‑day rate limits with reset countdowns, colored green → amber → red as they fill. A **compact** button shows up past 70 % context.
 - **Cost**: session total, spend per hour and what the last turn cost and took.
 - **Activity**: session length, prompts sent, most used tools and running subagents.
+- **Agents**: each subagent with its tokens and time, green while running and red when done. Past 6, a `↕` in the heading and the mouse wheel scrolls the list.
 - **Trend**: sparklines of context and cost per turn.
 - **Files**: files edited this session, newest first. Files outside the project are dimmed.
 - **Project**: folder, git branch and uncommitted changes (`+120 −34 · 5 uncommitted`).

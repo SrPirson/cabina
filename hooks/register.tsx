@@ -13,6 +13,9 @@ const EMPTY: Snapshot = {
 const snap = atom({ plugin: 'cabina', key: 'snap' } as const, EMPTY)
 const text = atom({ plugin: 'cabina', key: 'text' } as const, BUILT_IN.en!)
 const view = atom({ plugin: 'cabina', key: 'view' } as const, 'main' as 'main' | 'settings')
+// Filas que la lista de agentes está subida desde el final; 0 sigue a los más recientes.
+const crewBack = atom({ plugin: 'cabina', key: 'crewBack' } as const, 0)
+const CREW_ROWS = 6
 
 // "claude-opus-5-5[1m]" → "Opus 5.5 1M"; lo que no encaje se muestra tal cual.
 export const prettyModel = (id: string) => {
@@ -314,7 +317,7 @@ export const register: Register = (on, options) => {
           id, type: info?.type ?? 'agent', desc: info?.description ?? '', parentId: info?.parentId,
           tokens: 0, out: 0, tools: 0, startedAt: now,
         }
-        await bump($, s => ({ ...s, crew: [...s.crew.filter(a => a.id !== id), stat].slice(-20) }))
+        await bump($, s => ({ ...s, crew: [...s.crew.filter(a => a.id !== id), stat].slice(-50) }))
       }
     } else {
       // En el estado y no en una variable: una recarga del mod a mitad de turno no lo pierde.
@@ -437,6 +440,14 @@ export const register: Register = (on, options) => {
       await bump($, s => ({ ...s, now: at, hooks: { ...s.hooks, [event]: { at, busy: false, blocked, detail: s.hooks[event]?.detail } } }))
     }
     return ran
+  })
+
+  // La vista principal cabe siempre en el panel: la rueda mueve la lista de agentes cuando no caben.
+  on('ui.scroll', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
+    const max = Math.max(0, (await readSnap($)).crew.length - CREW_ROWS)
+    if (max === 0 || (await read($, view)) === 'settings') return next(e)
+    await update($, crewBack, b => Math.min(max, Math.max(0, b - e.by))).catch(() => undefined)
+    return {}
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
@@ -616,8 +627,9 @@ export const register: Register = (on, options) => {
     const files = s.files.slice(0, 4)
     const topTools = Object.entries(s.tools).sort((a, b) => b[1] - a[1]).slice(0, 3)
     const trendLen = Math.min(s.ctxTrend.length, barWidth + 8)
-    // Los más recientes; con poco sitio, los que no caben se cuentan en la cabecera.
-    const crew = s.crew.slice(-6)
+    // Una ventana de CREW_ROWS que la rueda mueve (ui.scroll); los que no caben se cuentan en la cabecera.
+    const back = Math.min(await read($, crewBack), Math.max(0, s.crew.length - CREW_ROWS))
+    const crew = s.crew.slice(Math.max(0, s.crew.length - CREW_ROWS - back), s.crew.length - back)
     // Sin seguimiento en vivo, solo los eventos de los que ya llegó algo: los demás se quedarían en gris.
     const hookEvents = trackHooks ? [...configured] : Object.keys(s.hooks)
     const wanted = {
@@ -736,7 +748,7 @@ export const register: Register = (on, options) => {
 
         {show.agents && (
           <Box flexDirection="column">
-            {section(t.secAgents, `${s.crew.length} · ↓ ${tokens(s.crew.reduce((n, a) => n + a.out, 0))}`)}
+            {section(t.secAgents, `${s.crew.length > CREW_ROWS ? '↕ ' : ''}${s.crew.length} · ↓ ${tokens(s.crew.reduce((n, a) => n + a.out, 0))}`)}
             {crew.map(a => {
               const running = a.endedAt === undefined
               const nested = a.parentId !== undefined && s.crew.some(p => p.id === a.parentId)

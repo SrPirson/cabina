@@ -48,6 +48,7 @@ Cabina coloca junto a la conversación un panel con los datos que normalmente ti
 - **Consumo**: ventana de contexto y límites de 5 horas y 7 días con cuenta atrás hasta el reinicio, en verde → ámbar → rojo según se llenan. Al pasar del 70 % de contexto aparece un botón para **compactar**.
 - **Coste**: total de la sesión, gasto por hora y lo que costó y duró el último turno.
 - **Actividad**: duración de la sesión, prompts enviados, herramientas más usadas y subagentes en curso.
+- **Agentes**: cada subagente con sus tokens y su tiempo, en verde mientras trabaja y en rojo al terminar. Si hay más de 6, un `↕` en la cabecera y la rueda del ratón recorre la lista.
 - **Tendencia**: minigráficas del contexto y del coste por turno.
 - **Archivos**: los archivos editados en la sesión, del más reciente al más antiguo. Los de fuera del proyecto salen atenuados.
 - **Proyecto**: carpeta, rama de git y cambios sin commitear (`+120 −34 · 5 sin commitear`).

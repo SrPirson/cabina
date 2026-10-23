@@ -64,6 +64,6 @@ export type Strings = {
 
 declare module 'claude-code' {
   interface PluginState {
-    cabina: { snap: Snapshot; text: Strings; view: 'main' | 'settings' }
+    cabina: { snap: Snapshot; text: Strings; view: 'main' | 'settings'; crewBack: number }
   }
 }
