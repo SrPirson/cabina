@@ -8,7 +8,7 @@ import { BACKGROUNDS, isThemeId, surfaceOf, THEME_IDS, themeName, themeOf, toneO
 const PANE = 'cabina'
 const EMPTY: Snapshot = {
   model: '', ctxWindow: 0, limits: [], compactions: 0, agents: [], crew: [], hooks: {}, cwd: '', now: 0,
-  files: [], tools: {}, prompts: 0, ctxTrend: [], costTrend: [],
+  files: [], tools: {}, prompts: 0, ctxTrend: [], costTrend: [], tokIn: 0, tokOut: 0,
 }
 const snap = atom({ plugin: 'cabina', key: 'snap' } as const, EMPTY)
 const text = atom({ plugin: 'cabina', key: 'text' } as const, BUILT_IN.en!)
@@ -330,14 +330,17 @@ export const register: Register = (on, options) => {
   on('turn.step', async function* ($, e, next) {
     if (e.agentId === undefined) {
       await patch($, { model: e.model, effort: e.effort === undefined ? undefined : String(e.effort) })
-      return yield* next(e)
     }
     const r = yield* next(e)
-    // Tokens como los cuenta Claude Code: el contexto de la última petición; la salida, sumada.
     const u = r.usage
     if (u) {
-      const ctx = u.input_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens + u.output_tokens
-      await touchAgent($, e.agentId, a => ({ ...a, tokens: ctx, out: a.out + u.output_tokens }))
+      // Total de la sesión: cada petición, del hilo principal y de los agentes.
+      const input = u.input_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens
+      await bump($, s => ({ ...s, tokIn: s.tokIn + input, tokOut: s.tokOut + u.output_tokens }))
+      // Tokens como los cuenta Claude Code: el contexto de la última petición; la salida, sumada.
+      if (e.agentId !== undefined) {
+        await touchAgent($, e.agentId, a => ({ ...a, tokens: input + u.output_tokens, out: a.out + u.output_tokens }))
+      }
     }
     return r
   })
@@ -622,7 +625,7 @@ export const register: Register = (on, options) => {
     const hasChanges = s.git !== undefined && s.git.changed > 0
     const baseRows = 2
       + (visible.usage ? 2 + s.limits.length + (showCompact ? 1 : 0) : 0)
-      + (visible.cost ? 3 + (s.lastTurn ? 1 : 0) : 0)
+      + (visible.cost ? 3 + (s.lastTurn ? 1 : 0) + (s.tokIn ? 1 : 0) : 0)
       + (visible.project ? 3 + (hasChanges ? 1 : 0) : 2)
     const files = s.files.slice(0, 4)
     const topTools = Object.entries(s.tools).sort((a, b) => b[1] - a[1]).slice(0, 3)
@@ -723,6 +726,9 @@ export const register: Register = (on, options) => {
             <Text {...dim} wrap="truncate">
               {`+$${s.lastTurn.costUsd.toFixed(2)} · ${span(s.lastTurn.durationMs)}`}
             </Text>
+          ))}
+          {s.tokIn > 0 && row('Tokens', (
+            <Text {...dim} wrap="truncate">{`${tokens(s.tokIn)} · ↓ ${tokens(s.tokOut)}`}</Text>
           ))}
         </Box>}
 

@@ -40,6 +40,9 @@ export type Snapshot = {
   startedAt?: number
   ctxTrend: number[]
   costTrend: number[]
+  // Tokens de toda la sesión (agentes incluidos): entrada con caché y salida.
+  tokIn: number
+  tokOut: number
   termLight?: boolean
   turnCostStart?: number
   schema?: number
