@@ -640,7 +640,7 @@ export const register: Register = (on, options) => {
       hooks: hookEvents.length ? 1 + hookEvents.length : 0,
       files: files.length ? 2 + files.length : 0,
       activity: s.startedAt !== undefined ? 3 + (topTools.length ? 1 : 0) + (s.agents.length ? 1 : 0) : 0,
-      trend: trendLen >= 3 ? 4 : 0,
+      trend: trendLen >= 3 ? 5 : 0,
     }
     let room = e.props.scroll.bodyRows - baseRows
     const fits = (rows: number) => {
@@ -803,13 +803,16 @@ export const register: Register = (on, options) => {
         {show.trend && (
           <Box flexDirection="column">
             {section(fill(t.trend, trendLen))}
-            {row(t.context, <Text color={toneOf(theme, ctx)}>{spark(s.ctxTrend.slice(-trendLen), 100)}</Text>)}
-            {row(t.cost, (
-              <Text color={fg}>
-                <Text color={theme.accent}>{spark(s.costTrend.slice(-trendLen))}</Text>
-                <Text {...dim}>{` ≤ $${costMax.toFixed(2)}`}</Text>
-              </Text>
-            ))}
+            {/* Una línea entre las dos barras: si no, los bloques de una tocan los de la otra. */}
+            <Box flexDirection="column" gap={1}>
+              {row(t.context, <Text color={toneOf(theme, ctx)}>{spark(s.ctxTrend.slice(-trendLen), 100)}</Text>)}
+              {row(t.cost, (
+                <Text color={fg}>
+                  <Text color={theme.accent}>{spark(s.costTrend.slice(-trendLen))}</Text>
+                  <Text {...dim}>{` ≤ $${costMax.toFixed(2)}`}</Text>
+                </Text>
+              ))}
+            </Box>
           </Box>
         )}
 
