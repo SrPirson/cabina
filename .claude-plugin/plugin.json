@@ -42,6 +42,18 @@
       "description": "Light up settings.json hooks as they run; turns itself off when an organization plugin skips Cabina's hook events",
       "default": true
     },
+    "status_line": {
+      "type": "boolean",
+      "title": "Línea de estado / Status line",
+      "description": "With the pane closed, show context, limits and cost under the prompt",
+      "default": true
+    },
+    "daily_budget": {
+      "type": "string",
+      "title": "Presupuesto diario / Daily budget",
+      "description": "US dollars a day across sessions, e.g. 10; empty = no budget",
+      "default": ""
+    },
     "show_usage": {
       "type": "boolean",
       "title": "Mostrar Consumo / Usage",
@@ -81,6 +93,12 @@
     "show_files": {
       "type": "boolean",
       "title": "Mostrar Archivos / Files",
+      "description": "Show this section of the pane",
+      "default": true
+    },
+    "show_log": {
+      "type": "boolean",
+      "title": "Mostrar Registro / Log",
       "description": "Show this section of the pane",
       "default": true
     },

@@ -12,6 +12,7 @@ const en: Strings = {
   sections: 'Sections', secTrend: 'Trend', secAgents: 'Agents', secHooks: 'Hooks', blocked: 'blocked', ago: '{n} ago',
   tClassic: 'Classic', tColorblind: 'Colour-blind safe', tContrast: 'High contrast', tMono: 'Monochrome',
   updated: 'Updated to v{n} · restart Claude Code to apply',
+  runsOut: 'runs out in {n}', confirm: 'compact? press again', today: 'Today', secLog: 'Log', models: 'Models', cache: 'cache',
 }
 
 export const BUILT_IN: Record<string, Strings> = {
@@ -28,6 +29,7 @@ export const BUILT_IN: Record<string, Strings> = {
     sections: 'Apartados', secTrend: 'Tendencia', secAgents: 'Agentes', secHooks: 'Hooks', blocked: 'bloqueó', ago: 'hace {n}',
     tClassic: 'Clásico', tColorblind: 'Apto para daltonismo', tContrast: 'Alto contraste', tMono: 'Monocromo',
     updated: 'Actualizado a v{n} · reinicia Claude Code para aplicarlo',
+    runsOut: 'se agota en {n}', confirm: '¿compactar? otra vez', today: 'Hoy', secLog: 'Registro', models: 'Modelos', cache: 'caché',
   },
   pt: {
     context: 'Contexto', h5: '5 horas', d7: '7 dias', spend: 'Gasto', cost: 'Custo', last: 'último',
@@ -41,6 +43,7 @@ export const BUILT_IN: Record<string, Strings> = {
     sections: 'Secções', secTrend: 'Tendência', secAgents: 'Agentes', secHooks: 'Hooks', blocked: 'bloqueou', ago: 'há {n}',
     tClassic: 'Clássico', tColorblind: 'Para daltonismo', tContrast: 'Alto contraste', tMono: 'Monocromático',
     updated: 'Atualizado para v{n} · reinicie o Claude Code para aplicar',
+    runsOut: 'esgota em {n}', confirm: 'compactar? outra vez', today: 'Hoje', secLog: 'Registo', models: 'Modelos', cache: 'cache',
   },
   fr: {
     context: 'Contexte', h5: '5 heures', d7: '7 jours', spend: 'Dépense', cost: 'Coût', last: 'dernier',
@@ -54,6 +57,7 @@ export const BUILT_IN: Record<string, Strings> = {
     sections: 'Sections', secTrend: 'Tendance', secAgents: 'Agents', secHooks: 'Hooks', blocked: 'bloqué', ago: 'il y a {n}',
     tClassic: 'Classique', tColorblind: 'Adapté au daltonisme', tContrast: 'Contraste élevé', tMono: 'Monochrome',
     updated: "Mis à jour en v{n} · redémarrez Claude Code pour l'appliquer",
+    runsOut: 'épuisé dans {n}', confirm: 'compacter ? encore', today: "Aujourd'hui", secLog: 'Journal', models: 'Modèles', cache: 'cache',
   },
   de: {
     context: 'Kontext', h5: '5 Std.', d7: '7 Tage', spend: 'Ausgaben', cost: 'Kosten', last: 'zuletzt',
@@ -67,6 +71,7 @@ export const BUILT_IN: Record<string, Strings> = {
     sections: 'Bereiche', secTrend: 'Verlauf', secAgents: 'Agenten', secHooks: 'Hooks', blocked: 'blockiert', ago: 'vor {n}',
     tClassic: 'Klassisch', tColorblind: 'Farbenblind-freundlich', tContrast: 'Hoher Kontrast', tMono: 'Monochrom',
     updated: 'Auf v{n} aktualisiert · Claude Code neu starten',
+    runsOut: 'leer in {n}', confirm: 'kompaktieren? nochmal', today: 'Heute', secLog: 'Protokoll', models: 'Modelle', cache: 'Cache',
   },
   it: {
     context: 'Contesto', h5: '5 ore', d7: '7 giorni', spend: 'Spesa', cost: 'Costo', last: 'ultimo',
@@ -80,6 +85,7 @@ export const BUILT_IN: Record<string, Strings> = {
     sections: 'Sezioni', secTrend: 'Andamento', secAgents: 'Agenti', secHooks: 'Hook', blocked: 'bloccato', ago: '{n} fa',
     tClassic: 'Classico', tColorblind: 'Adatto al daltonismo', tContrast: 'Alto contrasto', tMono: 'Monocromatico',
     updated: 'Aggiornato a v{n} · riavvia Claude Code per applicarlo',
+    runsOut: 'esaurito tra {n}', confirm: 'compattare? di nuovo', today: 'Oggi', secLog: 'Registro', models: 'Modelli', cache: 'cache',
   },
 }
 

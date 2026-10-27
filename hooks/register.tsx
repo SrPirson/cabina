@@ -1,14 +1,23 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { AgentStat, Snapshot, Strings } from '../types'
+import type { AgentStat, LogEntry, RateLimit, Snapshot, Strings } from '../types'
 import { BUILT_IN, ENDONYM, fill, normalize, parseStrings, translatePrompt } from './i18n'
+import { span } from './span'
 import { BACKGROUNDS, isThemeId, surfaceOf, THEME_IDS, themeName, themeOf, toneOf } from './themes'
 
 const PANE = 'cabina'
 const EMPTY: Snapshot = {
   model: '', ctxWindow: 0, limits: [], compactions: 0, agents: [], crew: [], hooks: {}, cwd: '', now: 0,
-  files: [], tools: {}, prompts: 0, ctxTrend: [], costTrend: [], tokIn: 0, tokOut: 0,
+  files: [], tools: {}, toolErr: {}, prompts: 0, ctxTrend: [], costTrend: [], tokIn: 0, tokOut: 0, tokCache: 0,
+  byModel: {}, linesPlus: 0, linesMinus: 0, log: [],
+}
+// Lo que /clear vacía: lo de la sesión. Modelo, proyecto, límites e historial siguen.
+const CLEARED: Partial<Snapshot> = {
+  compactions: 0, agents: [], crew: [], hooks: {}, files: [], tools: {}, toolErr: {}, prompts: 0,
+  ctxTrend: [], costTrend: [], tokIn: 0, tokOut: 0, tokCache: 0, byModel: {}, linesPlus: 0, linesMinus: 0, log: [],
+  ctxTokens: undefined, ctxPercent: undefined, costUsd: undefined, startedAt: undefined, lastTurn: undefined,
+  busySince: undefined, tool: undefined, turnCostStart: undefined, tokPerSec: undefined, compactArmed: undefined,
 }
 const snap = atom({ plugin: 'cabina', key: 'snap' } as const, EMPTY)
 const text = atom({ plugin: 'cabina', key: 'text' } as const, BUILT_IN.en!)
@@ -16,6 +25,11 @@ const view = atom({ plugin: 'cabina', key: 'view' } as const, 'main' as 'main' |
 // Filas que la lista de agentes está subida desde el final; 0 sigue a los más recientes.
 const crewBack = atom({ plugin: 'cabina', key: 'crewBack' } as const, 0)
 const CREW_ROWS = 6
+const LOG_ROWS = 5
+// Con el panel encima del prompt (fuera de pantalla completa), un resumen de este alto.
+const OPEN = { id: PANE, title: 'Cabina', rows: 8 }
+// Segundos que el botón de compactar espera la confirmación.
+const CONFIRM_MS = 5000
 
 // "claude-opus-5-5[1m]" → "Opus 5.5 1M"; lo que no encaje se muestra tal cual.
 export const prettyModel = (id: string) => {
@@ -28,12 +42,7 @@ export const prettyModel = (id: string) => {
 export const tokens = (n: number) =>
   n >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : `${n}`
 
-export const span = (ms: number) => {
-  if (ms < 60_000) return `${Math.max(0, Math.floor(ms / 1000))}s`
-  const m = Math.round(ms / 60_000)
-  const d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60)
-  return d ? `${d}d ${h}h` : h ? `${h}h ${m % 60}m` : `${m}m`
-}
+export { span }
 
 // [3, 9, 1] → "▃█▁"; con `max`, escala absoluta (el contexto va de 0 a 100).
 export const spark = (values: number[], max = Math.max(...values, 1e-9)) =>
@@ -61,6 +70,58 @@ export const agentUsage = (a: AgentStat, now: number) =>
 
 const pushTrend = (list: number[], v: number) => [...list, v].slice(-30)
 
+// Duración de las ventanas de límite que se conocen; el reinicio dice cuánto ha pasado.
+const WINDOW_MS: Record<string, number> = { five_hour: 5 * 3_600_000, seven_day: 7 * 86_400_000 }
+
+// Ritmo de un límite: dónde iría con un gasto uniforme (0-100) y, si al ritmo de ahora se acaba
+// antes del reinicio, en cuánto. Sin ventana conocida, nada; en el primer 5 % de la ventana no se predice.
+export const pace = (l: RateLimit, now: number) => {
+  const win = WINDOW_MS[l.kind]
+  const left = l.resetsAt ? Date.parse(l.resetsAt) - now : NaN
+  if (!win || !(left > 0) || left > win) return undefined
+  const gone = win - left
+  const runsOutIn = l.percentUsed > 0 && l.percentUsed < 100 && gone >= win / 20
+    ? ((100 - l.percentUsed) / l.percentUsed) * gone : undefined
+  return { expected: (gone / win) * 100, runsOutIn: runsOutIn !== undefined && runsOutIn < left ? runsOutIn : undefined }
+}
+
+// Líneas +/− de un Edit o Write: las de git si vienen; si no, las del parche (o el archivo entero si es nuevo).
+export const patchStat = (result: unknown) => {
+  const r = result as {
+    gitDiff?: { additions: number; deletions: number }; structuredPatch?: { lines: string[] }[]; type?: string; content?: string
+  } | undefined
+  if (r?.gitDiff) return { plus: r.gitDiff.additions, minus: r.gitDiff.deletions }
+  if (r?.type === 'create' && typeof r.content === 'string') return { plus: r.content.split('\n').length, minus: 0 }
+  const lines = r?.structuredPatch?.flatMap(h => h.lines) ?? []
+  return { plus: lines.filter(l => l.startsWith('+')).length, minus: lines.filter(l => l.startsWith('-')).length }
+}
+
+// Fecha local "2026-10-27": la clave del historial de coste.
+export const dayKey = (ms: number) => {
+  const d = new Date(ms)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+// Historial { día: usd } → coste de hoy y de los últimos 7 días (hoy incluido).
+export const historyTotals = (h: Record<string, number>, now: number) => ({
+  today: h[dayKey(now)] ?? 0,
+  week: Array.from({ length: 7 }, (_, i) => h[dayKey(now - i * 86_400_000)] ?? 0).reduce((a, b) => a + b, 0),
+})
+
+// "opus" → "Opus"; el nombre corto de un modelo para listas apretadas.
+const modelFamily = (id: string) => prettyModel(id).split(' ')[0]!
+
+// Lo esencial en una línea, para la línea de estado con el panel cerrado.
+const LIMIT_SHORT: Record<string, string> = { five_hour: '5h', seven_day: '7d', spend_limit: '$' }
+export const statusText = (s: Snapshot) => {
+  const parts = [
+    s.ctxPercent !== undefined ? `ctx ${Math.round(s.ctxPercent)}%` : undefined,
+    ...s.limits.map(l => `${LIMIT_SHORT[l.kind] ?? l.kind} ${Math.round(l.percentUsed)}%`),
+    s.costUsd !== undefined ? `$${s.costUsd.toFixed(2)}` : undefined,
+  ].filter(Boolean)
+  return parts.length ? `Cabina · ${parts.join(' · ')}` : undefined
+}
+
 export const shortPath = (p: string) => {
   const parts = p.split(/[\\/]+/).filter(Boolean)
   return parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : p
@@ -76,7 +137,7 @@ const resolveStrings = async ($: EngineInterface, setting: string): Promise<Stri
   const code = normalize(lang)
   const built = BUILT_IN[code]
   if (built) return built
-  const key = `i18n:v4:${code}`
+  const key = `i18n:v5:${code}`
   const cached = parseStrings(JSON.stringify((await $.store.get(key)) ?? null))
   if (cached) return cached
   const r = await $.model.complete({ model: 'haiku', prompt: translatePrompt(lang), maxTokens: 800 })
@@ -92,10 +153,52 @@ const readSnap = async ($: EngineInterface): Promise<Snapshot> => ({ ...EMPTY, .
 const bump = ($: EngineInterface, fn: (s: Snapshot) => Snapshot) =>
   update($, snap, s => fn({ ...EMPTY, ...s })).catch(() => undefined)
 const patch = ($: EngineInterface, p: Partial<Snapshot>) => bump($, s => ({ ...s, ...p }))
+const say = async ($: EngineInterface, kind: LogEntry['kind'], line: string) => {
+  const at = await $.clock.now()
+  await bump($, s => ({ ...s, log: [...s.log, { at, kind, text: line }].slice(-30) }))
+}
+
+// Suma el coste de un turno al día de hoy en $.store (compartido entre sesiones) y deja hoy y la semana en el panel.
+// ponytail: leer y escribir no es atómico; dos sesiones que acaban turno a la vez pueden perder uno. Un ledger por sesión si importa.
+const addHistory = async ($: EngineInterface, usd: number) => {
+  const now = await $.clock.now()
+  const h = { ...((await $.store.get('history').catch(() => undefined)) as Record<string, number> | undefined) }
+  if (usd > 0) {
+    h[dayKey(now)] = (h[dayKey(now)] ?? 0) + usd
+    const oldest = dayKey(now - 30 * 86_400_000)
+    for (const k of Object.keys(h)) if (k < oldest) delete h[k]
+    await $.store.set('history', h).catch(() => undefined)
+  }
+  await patch($, historyTotals(h, now))
+}
+
+// Con el panel cerrado, lo esencial en la línea de estado bajo el prompt; abierto, nada (ya se ve).
+const refreshStatus = async ($: EngineInterface, isOn: boolean) => {
+  if (!isOn) return
+  const shown = (await $.ui.panes().catch(() => [])).some(p => p.id === PANE && p.isShown)
+  $.ui.status(shown ? undefined : statusText(await readSnap($)))
+}
+
+// Primer clic: arma el botón; el segundo, antes de CONFIRM_MS, compacta. /compact espera al final del turno.
+const pressCompact = async ($: EngineInterface) => {
+  const now = await $.clock.now()
+  const armed = (await readSnap($)).compactArmed
+  if (armed === undefined || now - armed > CONFIRM_MS) {
+    await patch($, { compactArmed: now, now })
+    $.clock.after(CONFIRM_MS, () => void bump($, s => s.compactArmed === now ? { ...s, compactArmed: undefined } : s))
+    return
+  }
+  await patch($, { compactArmed: undefined })
+  await $.command.run({ command: 'compact', args: '' } as never)
+    .catch(err => $.ui.toast(`Cabina: ${err instanceof Error ? err.message : String(err)}`))
+}
 
 const refreshUsage = async ($: EngineInterface) => {
-  const u = await $.session.usage()
+  // El desglose «summary» es local y gratis: de él sale dónde salta el autocompactado.
+  const u = await $.session.usage({ breakdown: 'summary' })
+  const b = u.context.breakdown
   await patch($, {
+    autoCompactAt: b?.isAutoCompactEnabled ? b.autoCompactThreshold : undefined,
     ctxTokens: u.context.tokens,
     ctxWindow: u.context.window,
     ctxPercent: u.context.percent,
@@ -108,7 +211,7 @@ const refreshUsage = async ($: EngineInterface) => {
 
 const openSettings = async ($: EngineInterface) => {
   await update($, view, () => 'settings')
-  await $.ui.open({ id: PANE, title: 'Cabina', focus: true })
+  await $.ui.open({ ...OPEN, focus: true })
 }
 
 // Guarda un campo de userConfig como lo haría /config; el motor recarga el mod con el valor nuevo.
@@ -216,10 +319,14 @@ export const register: Register = (on, options) => {
   const themeId = String(options.theme ?? 'classic')
   const background = String(options.background ?? 'auto')
   // Apartados que el usuario quiere ver (userConfig show_<id>, todos por defecto).
-  const SECTION_IDS = ['usage', 'cost', 'activity', 'agents', 'hooks', 'trend', 'files', 'project'] as const
+  const SECTION_IDS = ['usage', 'cost', 'activity', 'agents', 'hooks', 'trend', 'files', 'log', 'project'] as const
   const visible = Object.fromEntries(SECTION_IDS.map(id => [id, options[`show_${id}`] !== false])) as
     Record<(typeof SECTION_IDS)[number], boolean>
   const surface = surfaceOf(themeId, background)
+  // Presupuesto diario en dólares; vacío o 0, sin presupuesto.
+  const budget = Number(String(options.daily_budget ?? '').replace(',', '.')) || 0
+  const statusLine = options.status_line !== false
+  let lastMode: string | undefined
 
   on('session.start', async ($, e, next) => {
     void checkVersion($).catch(() => undefined)
@@ -237,16 +344,19 @@ export const register: Register = (on, options) => {
       await patch($, { schema: 1, ctxTrend: [], costTrend: [], lastTurn: undefined, turnCostStart: undefined })
     }
 
-    // Reloj: cada segundo mientras trabaja (cronómetro), cada 30 s en reposo (cuentas atrás).
+    // Reloj: los cronómetros avanzan solos en terminal y escritorio (elapsed.tsx); el panel se redibuja
+    // cada segundo solo si un hook está encendido o hay una superficie sin Client (VS Code, móvil). Si no, cada 30 s.
     let tick = 0
     $.clock.every(1000, async () => {
       tick++
       const s = await readSnap($)
-      const live = s.busySince !== undefined || s.crew.some(a => a.endedAt === undefined)
-        || Object.values(s.hooks).some(h => h.busy || s.now - h.at < 60_000)
-      if (live || tick % 30 === 0) await patch($, { now: await $.clock.now() })
+      const running = s.busySince !== undefined || s.crew.some(a => a.endedAt === undefined)
+      const hooksLive = Object.values(s.hooks).some(h => h.busy || s.now - h.at < 60_000)
+      const noClient = running && (await $.session.surfaces().catch(() => [])).some(x => x === 'vscode' || x === 'mobile')
+      if (hooksLive || noClient || tick % 30 === 0) await patch($, { now: await $.clock.now() })
     })
-    void $.ui.open({ id: PANE, title: 'Cabina' })
+    void addHistory($, 0)
+    void $.ui.open(OPEN).then(() => refreshStatus($, statusLine)).catch(() => undefined)
 
     return next(e)
   })
@@ -261,6 +371,7 @@ export const register: Register = (on, options) => {
     }
     if (/^(close|closed|hide|cerrar|ocultar|fechar|fermer|schließen|chiudi)$/i.test(sub)) {
       await $.ui.close({ id: PANE })
+      await refreshStatus($, statusLine)
       return { text: t.closed }
     }
     if (/^(theme|tema|thème|thema)$/i.test(sub) && arg) {
@@ -289,7 +400,8 @@ export const register: Register = (on, options) => {
         ].join('\n'),
       }
     }
-    await $.ui.open({ id: PANE, title: 'Cabina' })
+    await $.ui.open(OPEN)
+    await refreshStatus($, statusLine)
     return { text: (await read($, text)).opened }
   })
 
@@ -301,6 +413,7 @@ export const register: Register = (on, options) => {
       limits: e.rateLimits,
       costUsd: e.cost?.usd,
     })
+    await refreshStatus($, statusLine)
     return next(e)
   })
 
@@ -318,6 +431,7 @@ export const register: Register = (on, options) => {
           tokens: 0, out: 0, tools: 0, startedAt: now,
         }
         await bump($, s => ({ ...s, crew: [...s.crew.filter(a => a.id !== id), stat].slice(-50) }))
+        await say($, 'agent', stat.desc || stat.type)
       }
     } else {
       // En el estado y no en una variable: una recarga del mod a mitad de turno no lo pierde.
@@ -328,15 +442,32 @@ export const register: Register = (on, options) => {
   })
 
   on('turn.step', async function* ($, e, next) {
-    if (e.agentId === undefined) {
+    const isMain = e.agentId === undefined
+    if (isMain) {
       await patch($, { model: e.model, effort: e.effort === undefined ? undefined : String(e.effort) })
     }
-    const r = yield* next(e)
+    // Velocidad del hilo principal: salida entre el primer trozo que no es del motor y el final.
+    let firstAt: number | undefined
+    const stream = next(e)
+    for await (const c of stream) {
+      if (isMain && firstAt === undefined && c.kind !== 'engine') firstAt = await $.clock.now()
+      yield c
+    }
+    const r = await stream.result
     const u = r.usage
     if (u) {
       // Total de la sesión: cada petición, del hilo principal y de los agentes.
       const input = u.input_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens
-      await bump($, s => ({ ...s, tokIn: s.tokIn + input, tokOut: s.tokOut + u.output_tokens }))
+      const secs = firstAt === undefined ? 0 : ((await $.clock.now()) - firstAt) / 1000
+      await bump($, s => ({
+        ...s,
+        tokIn: s.tokIn + input,
+        tokOut: s.tokOut + u.output_tokens,
+        tokCache: s.tokCache + u.cache_read_input_tokens,
+        byModel: { ...s.byModel, [u.model]: (s.byModel[u.model] ?? 0) + input + u.output_tokens },
+        // Con menos de medio segundo de salida la cifra no dice nada.
+        ...(secs >= 0.5 ? { tokPerSec: u.output_tokens / secs } : {}),
+      }))
       // Tokens como los cuenta Claude Code: el contexto de la última petición; la salida, sumada.
       if (e.agentId !== undefined) {
         await touchAgent($, e.agentId, a => ({ ...a, tokens: input + u.output_tokens, out: a.out + u.output_tokens }))
@@ -361,14 +492,25 @@ export const register: Register = (on, options) => {
       const file = 'file_path' in e && typeof e.file_path === 'string' ? e.file_path
         : 'notebook_path' in e && typeof e.notebook_path === 'string' ? e.notebook_path : undefined
       const isWrite = tool === 'Edit' || tool === 'Write' || tool === 'NotebookEdit'
-      const wrote = isWrite && file !== undefined && !('deny' in ran && ran.deny) && !ran.isError
+      const deny = 'deny' in ran && ran.deny ? ran.deny : undefined
+      const failed = deny !== undefined || ran.isError === true
+      const wrote = isWrite && file !== undefined && !failed
+      const lines = wrote ? patchStat(ran.result) : { plus: 0, minus: 0 }
       if (tool && e.agentId !== undefined) await touchAgent($, e.agentId, a => ({ ...a, tools: a.tools + 1 }))
       if (tool) {
         await bump($, s => ({
           ...s,
           tools: { ...s.tools, [tool]: (s.tools[tool] ?? 0) + 1 },
+          toolErr: failed ? { ...s.toolErr, [tool]: (s.toolErr[tool] ?? 0) + 1 } : s.toolErr,
           files: wrote ? [file, ...s.files.filter(f => f !== file)].slice(0, 20) : s.files,
+          linesPlus: s.linesPlus + lines.plus,
+          linesMinus: s.linesMinus + lines.minus,
         }))
+        if (wrote) await say($, 'edit', relPath(file, (await readSnap($)).cwd))
+        else if (failed) {
+          const why = (deny ?? ran.text ?? '').trim().split('\n')[0]!.slice(0, 80)
+          await say($, deny !== undefined ? 'deny' : 'error', why ? `${tool} · ${why}` : tool)
+        }
       }
       return ran
     } finally {
@@ -381,8 +523,12 @@ export const register: Register = (on, options) => {
     if (e.agentId !== undefined) {
       const id = e.agentId
       const now = await $.clock.now()
+      // Un agente que acaba bien no es rojo: solo el que falla o se interrumpe.
+      const failed = e.isAborted || e.reason === 'error'
       await bump($, s => ({ ...s, agents: s.agents.filter(a => a !== id) }))
-      await touchAgent($, id, a => ({ ...a, endedAt: now }))
+      await touchAgent($, id, a => ({ ...a, endedAt: now, failed }))
+      const a = (await readSnap($)).crew.find(x => x.id === id)
+      if (a) await say($, failed ? 'error' : 'done', a.desc || a.type)
       return ran
     }
     const u = await refreshUsage($)
@@ -397,22 +543,44 @@ export const register: Register = (on, options) => {
       tool: undefined,
       turnCostStart: undefined,
       ...(turnCost === undefined ? {} : {
-        lastTurn: { durationMs: e.durationMs, costUsd: turnCost },
+        lastTurn: { durationMs: e.durationMs, costUsd: turnCost, tokPerSec: x.tokPerSec },
         ctxTrend: pushTrend(x.ctxTrend, u.context.percent ?? 0),
         costTrend: pushTrend(x.costTrend, turnCost),
       }),
     }))
+    if (turnCost !== undefined) await addHistory($, turnCost)
+    await refreshStatus($, statusLine)
     return ran
   })
 
   on('session.compact', async ($, e, next) => {
     const ran = await next(e)
-    if (e.agentId === undefined) await bump($, s => ({ ...s, compactions: s.compactions + 1 }))
+    if (e.agentId === undefined) {
+      await bump($, s => ({ ...s, compactions: s.compactions + 1 }))
+      await say($, 'compact', '')
+    }
+    return ran
+  })
+
+  // /clear empieza otra sesión en el mismo proceso: el panel también.
+  on('session.end', async ($, e, next) => {
+    const ran = await next(e)
+    if (e.reason === 'clear') {
+      await patch($, CLEARED)
+      await refreshUsage($).catch(() => undefined)
+    }
     return ran
   })
 
   // Los hooks de settings van debajo de los módulos en la cadena: lo que tarda next es lo que tardan ellos.
-  if (trackHooks) on('classic.*', async ($, e, next) => {
+  on('classic.*', async ($, e, next) => {
+    // Cualquier evento clásico trae el modo de permisos (plan, acceptEdits…); se apunta cuando cambia.
+    const mode = 'permission_mode' in e && typeof e.permission_mode === 'string' ? e.permission_mode : undefined
+    if (mode && mode !== lastMode) {
+      lastMode = mode
+      await patch($, { permissionMode: mode })
+    }
+    if (!trackHooks) return next(e)
     const event = next.event.slice('classic.'.length)
     if (event === 'PreToolUse' && 'tool_use_id' in e) seenPre.add(e.tool_use_id)
     if (!configured.has(event)) return next(e)
@@ -420,6 +588,7 @@ export const register: Register = (on, options) => {
     const mark = async (busy: boolean, blocked = false) => {
       const at = await $.clock.now()
       await bump($, s => ({ ...s, now: at, hooks: { ...s.hooks, [event]: { at, busy, blocked, detail } } }))
+      if (blocked) await say($, 'hook', detail ? `${event} · ${detail}` : event)
     }
     await mark(true)
     try {
@@ -441,6 +610,8 @@ export const register: Register = (on, options) => {
       const at = await $.clock.now()
       const blocked = /block|stop|error/i.test(e.message.name ?? '')
       await bump($, s => ({ ...s, now: at, hooks: { ...s.hooks, [event]: { at, busy: false, blocked, detail: s.hooks[event]?.detail } } }))
+      // Con seguimiento en vivo, el bloqueo ya lo apuntó classic.*.
+      if (blocked && !trackHooks) await say($, 'hook', event)
     }
     return ran
   })
@@ -466,7 +637,7 @@ export const register: Register = (on, options) => {
       ]
       const themes = THEME_IDS.map(id => ({ value: id, label: themeName(t, id) }))
       const snapMode = await readSnap($)
-      const sectionName = { usage: t.secUsage, cost: t.secCost, activity: t.secActivity, agents: t.secAgents, hooks: t.secHooks, trend: t.secTrend, files: t.files, project: t.secProject }
+      const sectionName = { usage: t.secUsage, cost: t.secCost, activity: t.secActivity, agents: t.secAgents, hooks: t.secHooks, trend: t.secTrend, files: t.files, log: t.secLog, project: t.secProject }
       // Elegir un apartado lo muestra u oculta; la marca dice cómo está ahora.
       const sections = SECTION_IDS.map(id => ({ value: id, label: `${visible[id] ? '✓' : '○'} ${sectionName[id]}` }))
       const toggle = (id: string) => {
@@ -555,7 +726,8 @@ export const register: Register = (on, options) => {
       )
     }
 
-    const { Box, Text, Button } = $.ui.resolve(e)
+    const els = $.ui.resolve(e)
+    const { Box, Text, Button } = els
     const s = await readSnap($)
     // /model no abre turno, y classic.PostModelSwitch no llega aquí en cuentas
     // con ajustes gestionados (cc-plugin-sec-default se lo queda): se lee en vivo.
@@ -574,10 +746,18 @@ export const register: Register = (on, options) => {
     const t = await read($, text)
     const limitLabel: Record<string, string> = { five_hour: t.h5, seven_day: t.d7, spend_limit: t.spend }
     const lastLabel = t.last.charAt(0).toUpperCase() + t.last.slice(1)
-    const labels = [t.context, t.cost, t.agents, t.total, lastLabel, t.duration, t.tools, ...Object.values(limitLabel)]
+    const labels = [t.context, t.cost, t.agents, t.total, lastLabel, t.duration, t.tools, t.today, t.models, ...Object.values(limitLabel)]
     const labelWidth = Math.min(12, 1 + Math.max(...labels.map(x => x.length)))
     const cols = e.props.bodyColumns - (surface ? 2 : 0)
     const barWidth = Math.max(6, Math.min(20, cols - 18 - labelWidth))
+
+    // Cronómetro: en terminal y escritorio avanza solo (elapsed.tsx) sin redibujar el panel.
+    const hasClient = 'Client' in els && (e.surface === 'terminal' || e.surface === 'desktop')
+    const clock = (key: string, since: number, color?: string) => hasClient
+      // Un Client no admite props undefined: sin color, la clave no va.
+      ? <els.Client key={key} module="./elapsed.tsx"
+        props={{ since, now: s.now, dim: !color && !surface, ...((color ?? surface?.sub) ? { color: color ?? surface?.sub } : {}) }} />
+      : <Text color={color} {...(color ? {} : dim)}>{span(s.now - since)}</Text>
 
     // Cabecera de cada apartado: nombre en el color de acento y una regla hasta el borde.
     const section = (title: string, right = '') => {
@@ -592,15 +772,21 @@ export const register: Register = (on, options) => {
       )
     }
 
-    const gauge = (label: string, pct: number, right: string) => {
+    // Barra con una marca opcional (◆ ritmo uniforme, ┃ autocompactado); las celdas seguidas del mismo color van juntas.
+    const gauge = (label: string, pct: number, right: string, mark?: { at: number; glyph: string }) => {
       const full = Math.round((Math.min(100, Math.max(0, pct)) / 100) * barWidth)
+      const markAt = mark ? Math.min(barWidth - 1, Math.max(0, Math.floor((mark.at / 100) * barWidth))) : -1
+      const runs: [string, string | undefined][] = []
+      for (let i = 0; i < barWidth; i++) {
+        const [ch, color] = i === markAt ? [mark!.glyph, fg] : ['━', i < full ? toneOf(theme, pct) : muted]
+        const last = runs[runs.length - 1]
+        if (last && last[1] === color) last[0] += ch
+        else runs.push([ch, color])
+      }
       return (
         <Box flexDirection="row" gap={1}>
           <Box width={labelWidth}><Text {...dim} wrap="truncate">{label}</Text></Box>
-          <Text color={fg}>
-            <Text color={toneOf(theme, pct)}>{'━'.repeat(full)}</Text>
-            <Text color={muted}>{'━'.repeat(barWidth - full)}</Text>
-          </Text>
+          <Text color={fg}>{runs.map(([ch, color], i) => <Text key={`${i}`} color={color} bold={ch !== '━'}>{ch}</Text>)}</Text>
           <Box width={4} justifyContent="flex-end"><Text color={fg} bold>{`${Math.round(pct)}%`}</Text></Box>
           <Text {...dim} wrap="truncate">{right}</Text>
         </Box>
@@ -609,9 +795,6 @@ export const register: Register = (on, options) => {
 
     const busy = s.busySince !== undefined
     const ctx = s.ctxPercent ?? 0
-    const status = busy
-      ? [s.tool, span(s.now - (s.busySince ?? s.now))].filter(Boolean).join(' · ')
-      : t.idle
     const row = (label: string, children: JSX.Element) => (
       <Box flexDirection="row" gap={1}>
         <Box width={labelWidth}><Text {...dim} wrap="truncate">{label}</Text></Box>
@@ -619,13 +802,71 @@ export const register: Register = (on, options) => {
       </Box>
     )
 
+    const header = (
+      <Box flexDirection="row" justifyContent="space-between" gap={1}>
+        <Box flexShrink={1}>
+          <Text color={fg} wrap="truncate">
+            <Text color={busy ? theme.accent : muted}>● </Text>
+            <Text color={fg} bold>{prettyModel(liveModel) || '—'}</Text>
+            {liveEffort && <Text {...dim}>{` · ${liveEffort}`}</Text>}
+            {s.permissionMode && s.permissionMode !== 'default' && <Text color={theme.warn}>{` · ${s.permissionMode}`}</Text>}
+          </Text>
+        </Box>
+        {busy ? (
+          <Box flexDirection="row" flexShrink={0}>
+            {s.tool && <Text color={theme.accent}>{`${s.tool} · `}</Text>}
+            {clock('busy', s.busySince ?? s.now, theme.accent)}
+          </Box>
+        ) : <Text color={muted}>{t.idle}</Text>}
+      </Box>
+    )
+
+    // Contexto: lo que falta para el autocompactado, con su marca en la barra.
+    const compactLeft = s.autoCompactAt !== undefined && s.ctxTokens !== undefined ? s.autoCompactAt - s.ctxTokens : undefined
+    const ctxGauge = gauge(
+      t.context,
+      ctx,
+      // Con autocompactado, lo que falta para él (`410k ⟲425k`); el % ya dice cuánto es de la ventana.
+      compactLeft !== undefined && compactLeft > 0 ? `${tokens(s.ctxTokens ?? 0)} ⟲${tokens(compactLeft)}`
+        : s.ctxWindow ? `${tokens(s.ctxTokens ?? 0)}/${tokens(s.ctxWindow)}` : '',
+      s.autoCompactAt !== undefined && s.ctxWindow ? { at: (s.autoCompactAt / s.ctxWindow) * 100, glyph: '┃' } : undefined,
+    )
+    const limitGauge = (l: (typeof s.limits)[number]) => {
+      const p = pace(l, s.now)
+      return gauge(
+        limitLabel[l.kind] ?? l.kind,
+        l.percentUsed,
+        l.resetsAt ? `↻ ${span(Date.parse(l.resetsAt) - s.now)}` : '',
+        p && { at: p.expected, glyph: '◆' },
+      )
+    }
+
+    // Encima del prompt (fuera de pantalla completa) no hay sitio: un resumen de 8 filas como mucho.
+    if (e.props.placement === 'inline') {
+      return (
+        <Box flexDirection="column">
+          {header}
+          {ctxGauge}
+          {s.limits.map(limitGauge)}
+          <Text {...dim} wrap="truncate">
+            {[s.costUsd === undefined ? '' : `$${s.costUsd.toFixed(2)}`, s.lastTurn ? `+$${s.lastTurn.costUsd.toFixed(2)}` : '', s.branch ? `⎇ ${s.branch}` : '']
+              .filter(Boolean).join(' · ')}
+          </Text>
+        </Box>
+      )
+    }
+
     // Apartados fijos: estado, consumo, coste y proyecto. Los demás, por prioridad, solo si caben
     // (cada uno cuenta su cabecera y el hueco que lo separa).
     const showCompact = ctx >= 70 || s.compactions > 0
     const hasChanges = s.git !== undefined && s.git.changed > 0
+    const runsOut = s.limits.map(l => pace(l, s.now)?.runsOutIn)
+    const models = Object.entries(
+      Object.entries(s.byModel).reduce<Record<string, number>>((m, [id, n]) => ({ ...m, [modelFamily(id)]: (m[modelFamily(id)] ?? 0) + n }), {}),
+    ).sort((a, b) => b[1] - a[1])
     const baseRows = 2
-      + (visible.usage ? 2 + s.limits.length + (showCompact ? 1 : 0) : 0)
-      + (visible.cost ? 3 + (s.lastTurn ? 1 : 0) + (s.tokIn ? 1 : 0) : 0)
+      + (visible.usage ? 2 + s.limits.length + runsOut.filter(Boolean).length + (showCompact ? 1 : 0) : 0)
+      + (visible.cost ? 3 + (s.lastTurn ? 1 : 0) + (s.tokIn ? 1 : 0) + (s.today !== undefined ? 1 : 0) + (models.length > 1 ? 1 : 0) : 0)
       + (visible.project ? 3 + (hasChanges ? 1 : 0) : 2)
     const files = s.files.slice(0, 4)
     const topTools = Object.entries(s.tools).sort((a, b) => b[1] - a[1]).slice(0, 3)
@@ -635,12 +876,14 @@ export const register: Register = (on, options) => {
     const crew = s.crew.slice(Math.max(0, s.crew.length - CREW_ROWS - back), s.crew.length - back)
     // Sin seguimiento en vivo, solo los eventos de los que ya llegó algo: los demás se quedarían en gris.
     const hookEvents = trackHooks ? [...configured] : Object.keys(s.hooks)
+    const log = s.log.slice(-LOG_ROWS)
     const wanted = {
       agents: crew.length ? 1 + crew.length : 0,
       hooks: hookEvents.length ? 1 + hookEvents.length : 0,
       files: files.length ? 2 + files.length : 0,
       activity: s.startedAt !== undefined ? 3 + (topTools.length ? 1 : 0) + (s.agents.length ? 1 : 0) : 0,
       trend: trendLen >= 3 ? 5 : 0,
+      log: log.length ? 2 + log.length : 0,
     }
     let room = e.props.scroll.bodyRows - baseRows
     const fits = (rows: number) => {
@@ -654,11 +897,17 @@ export const register: Register = (on, options) => {
       agents: visible.agents && fits(wanted.agents),
       hooks: visible.hooks && fits(wanted.hooks),
       trend: visible.trend && fits(wanted.trend),
+      log: visible.log && fits(wanted.log),
     }
 
     const elapsed = s.startedAt !== undefined ? s.now - s.startedAt : 0
     const perHour = s.costUsd !== undefined && elapsed > 5 * 60_000 ? s.costUsd / (elapsed / 3_600_000) : undefined
     const costMax = Math.max(...s.costTrend.slice(-trendLen), 0)
+    const cacheHit = s.tokIn > 0 ? Math.round((s.tokCache / s.tokIn) * 100) : undefined
+    const logMark: Record<LogEntry['kind'], [string, string]> = {
+      edit: ['+', theme.ok], error: ['✗', theme.danger], deny: ['⊘', theme.warn],
+      agent: ['▸', theme.accent], done: ['✓', theme.ok], compact: ['⟲', theme.accent], hook: ['!', theme.danger],
+    }
 
     // Esquina de ajustes: la versión, discreta; si hay una más nueva, un botón que la instala.
     const hasUpdate = s.version !== undefined && s.latest !== undefined && isNewer(s.latest, s.version)
@@ -680,34 +929,23 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="column" gap={1} backgroundColor={surface?.bg} paddingX={surface ? 1 : 0}
         minHeight={surface ? e.props.scroll.bodyRows : undefined}>
-        <Box flexDirection="row" justifyContent="space-between">
-          <Text color={fg} wrap="truncate">
-            <Text color={busy ? theme.accent : muted}>● </Text>
-            <Text color={fg} bold>{prettyModel(liveModel) || '—'}</Text>
-            {liveEffort && <Text {...dim}>{` · ${liveEffort}`}</Text>}
-          </Text>
-          <Text color={busy ? theme.accent : muted}>{status}</Text>
-        </Box>
+        {header}
 
         {visible.usage && <Box flexDirection="column">
           {section(t.secUsage)}
-          {gauge(
-            t.context,
-            ctx,
-            s.ctxWindow ? `${tokens(s.ctxTokens ?? 0)}/${tokens(s.ctxWindow)}` : '',
-          )}
-          {s.limits.map(l =>
-            gauge(
-              limitLabel[l.kind] ?? l.kind,
-              l.percentUsed,
-              l.resetsAt ? `↻ ${span(Date.parse(l.resetsAt) - s.now)}` : '',
-            ),
-          )}
+          {ctxGauge}
+          {s.limits.map((l, i) => (
+            <Box key={l.kind} flexDirection="column">
+              {limitGauge(l)}
+              {runsOut[i] !== undefined && row('', <Text color={theme.warn} wrap="truncate">{`▲ ${fill(t.runsOut, span(runsOut[i]!))}`}</Text>)}
+            </Box>
+          ))}
           {showCompact && (
             <Box flexDirection="row" gap={1}>
               {ctx >= 70 && (
-                <Button key="compact" label={t.compact} variant={ctx >= 85 ? 'primary' : undefined}
-                  onPress={() => void $.session.compact()} />
+                <Button key="compact" label={s.compactArmed !== undefined ? t.confirm : t.compact}
+                  variant={ctx >= 85 || s.compactArmed !== undefined ? 'primary' : undefined}
+                  onPress={() => void pressCompact($)} />
               )}
               {s.compactions > 0 && <Text {...dim}>{fill(t.compacted, s.compactions)}</Text>}
             </Box>
@@ -722,13 +960,27 @@ export const register: Register = (on, options) => {
               {perHour !== undefined && <Text {...dim}>{` · $${perHour.toFixed(2)}/h`}</Text>}
             </Text>
           ))}
+          {s.today !== undefined && (budget > 0
+            ? gauge(t.today, (s.today / budget) * 100, `$${s.today.toFixed(2)}/$${budget} · ${t.d7} $${(s.week ?? 0).toFixed(2)}`)
+            : row(t.today, (
+              <Text color={fg} wrap="truncate">
+                {`$${s.today.toFixed(2)}`}
+                <Text {...dim}>{` · ${t.d7} $${(s.week ?? 0).toFixed(2)}`}</Text>
+              </Text>
+            )))}
           {s.lastTurn && row(lastLabel, (
             <Text {...dim} wrap="truncate">
-              {`+$${s.lastTurn.costUsd.toFixed(2)} · ${span(s.lastTurn.durationMs)}`}
+              {[`+$${s.lastTurn.costUsd.toFixed(2)}`, span(s.lastTurn.durationMs), s.lastTurn.tokPerSec ? `${Math.round(s.lastTurn.tokPerSec)} tok/s` : '']
+                .filter(Boolean).join(' · ')}
             </Text>
           ))}
           {s.tokIn > 0 && row('Tokens', (
-            <Text {...dim} wrap="truncate">{`${tokens(s.tokIn)} · ↓ ${tokens(s.tokOut)}`}</Text>
+            <Text {...dim} wrap="truncate">
+              {`${tokens(s.tokIn)} · ↓ ${tokens(s.tokOut)}${cacheHit !== undefined ? ` · ${t.cache} ${cacheHit}%` : ''}`}
+            </Text>
+          ))}
+          {models.length > 1 && row(t.models, (
+            <Text {...dim} wrap="truncate">{models.map(([name, n]) => `${name} ${tokens(n)}`).join(' · ')}</Text>
           ))}
         </Box>}
 
@@ -743,7 +995,12 @@ export const register: Register = (on, options) => {
             ))}
             {topTools.length > 0 && row(t.tools, (
               <Text color={fg} wrap="truncate">
-                {topTools.map(([name, n], i) => `${i > 0 ? ' · ' : ''}${name} ${n}`).join('')}
+                {topTools.map(([name, n], i) => (
+                  <Text key={name} color={fg}>
+                    {`${i > 0 ? ' · ' : ''}${name} ${n}`}
+                    {s.toolErr[name] ? <Text color={theme.danger}>{` ✗${s.toolErr[name]}`}</Text> : null}
+                  </Text>
+                ))}
               </Text>
             ))}
             {s.agents.length > 0 && row(t.agents, (
@@ -758,16 +1015,21 @@ export const register: Register = (on, options) => {
             {crew.map(a => {
               const running = a.endedAt === undefined
               const nested = a.parentId !== undefined && s.crew.some(p => p.id === a.parentId)
+              // En curso ●, terminado ✓ atenuado, fallido o parado ✗ en rojo.
+              const [glyph, color] = running ? ['●', theme.ok] : a.failed ? ['✗', theme.danger] : ['✓', muted]
               return (
                 <Box key={a.id} flexDirection="row" justifyContent="space-between" gap={1}>
                   <Box flexShrink={1}>
                     <Text color={fg} wrap="truncate">
-                      <Text color={running ? theme.ok : theme.danger}>{nested ? '└ ' : '● '}</Text>
-                      <Text color={fg}>{a.desc || a.type}</Text>
+                      <Text color={color}>{nested ? `└${glyph} ` : `${glyph} `}</Text>
+                      {running || a.failed ? <Text color={fg}>{a.desc || a.type}</Text> : <Text {...dim}>{a.desc || a.type}</Text>}
                     </Text>
                   </Box>
-                  <Box flexShrink={0}>
-                    <Text {...dim}>{agentUsage(a, s.now)}</Text>
+                  {/* Sin fragmentos: el motor los dibuja como una caja en columna y el tiempo bajaría de línea. */}
+                  <Box flexDirection="row" flexShrink={0}>
+                    {running && <Text {...dim}>{`${tokens(a.tokens)} · ↓ ${tokens(a.out)} · `}</Text>}
+                    {running && clock(`agent-${a.id}`, a.startedAt)}
+                    {!running && <Text {...dim}>{agentUsage(a, s.now)}</Text>}
                   </Box>
                 </Box>
               )
@@ -818,13 +1080,33 @@ export const register: Register = (on, options) => {
 
         {show.files && (
           <Box flexDirection="column">
-            {section(t.files, fill(t.edited, s.files.length))}
+            {section(t.files, [fill(t.edited, s.files.length), s.linesPlus || s.linesMinus ? `+${s.linesPlus} −${s.linesMinus}` : ''].filter(Boolean).join(' · '))}
             {files.map(f => (
               // Los de fuera del proyecto (relPath no los acorta) van atenuados.
               relPath(f, s.cwd) === f.replace(/\\/g, '/')
                 ? <Text {...dim} wrap="truncate-start">{f.replace(/\\/g, '/')}</Text>
                 : <Text color={fg} wrap="truncate-start">{relPath(f, s.cwd)}</Text>
             ))}
+          </Box>
+        )}
+
+        {show.log && (
+          <Box flexDirection="column">
+            {section(t.secLog)}
+            {log.map((l, i) => {
+              const [glyph, color] = logMark[l.kind]
+              return (
+                <Box key={`${l.at}-${i}`} flexDirection="row" justifyContent="space-between" gap={1}>
+                  <Box flexShrink={1}>
+                    <Text color={fg} wrap="truncate">
+                      <Text color={color}>{`${glyph} `}</Text>
+                      {l.kind === 'compact' ? fill(t.compacted, s.compactions) : l.text}
+                    </Text>
+                  </Box>
+                  <Box flexShrink={0}><Text {...dim}>{fill(t.ago, span(s.now - l.at))}</Text></Box>
+                </Box>
+              )
+            })}
           </Box>
         )}
 

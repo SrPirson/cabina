@@ -45,14 +45,18 @@ Cabina coloca junto a la conversación un panel con los datos que normalmente ti
 
 ## Funciones
 
-- **Consumo**: ventana de contexto y límites de 5 horas y 7 días con cuenta atrás hasta el reinicio, en verde → ámbar → rojo según se llenan. Al pasar del 70 % de contexto aparece un botón para **compactar**.
-- **Coste**: total de la sesión, gasto por hora y lo que costó y duró el último turno.
-- **Actividad**: duración de la sesión, prompts enviados, herramientas más usadas y subagentes en curso.
-- **Agentes**: cada subagente con sus tokens y su tiempo, en verde mientras trabaja y en rojo al terminar. Si hay más de 6, un `↕` en la cabecera y la rueda del ratón recorre la lista.
+- **Consumo**: ventana de contexto y límites de 5 horas y 7 días con cuenta atrás hasta el reinicio, en verde → ámbar → rojo según se llenan. Un `◆` en cada límite marca dónde irías a ritmo uniforme, y `▲ se agota en 1h25m` avisa cuando al ritmo actual se acaba antes del reinicio. La barra de contexto marca dónde salta el autocompactado (`410k ⟲38k`: tokens usados y los que quedan hasta él). Al pasar del 70 % aparece un botón para **compactar**, que pide una segunda pulsación.
+- **Coste**: total de la sesión, gasto por hora, hoy y los últimos 7 días sumando todas las sesiones (frente a un presupuesto diario si lo pones), lo que costó, duró y a qué velocidad (tok/s) fue el último turno, tokens con el acierto de caché y tokens por modelo cuando hay varios.
+- **Actividad**: duración de la sesión, prompts enviados, herramientas más usadas con sus fallos (`Bash 12 ✗2`) y subagentes en curso.
+- **Agentes**: cada subagente con sus tokens y su tiempo, `●` mientras trabaja, `✓` al terminar y `✗` en rojo si falla o se para. Los cronómetros avanzan solos sin redibujar el panel. Si hay más de 6, un `↕` en la cabecera y la rueda del ratón recorre la lista.
 - **Tendencia**: minigráficas del contexto y del coste por turno.
-- **Archivos**: los archivos editados en la sesión, del más reciente al más antiguo. Los de fuera del proyecto salen atenuados.
+- **Archivos**: los archivos editados en la sesión, del más reciente al más antiguo, con las líneas que ha escrito Claude (`+120 −34`). Los de fuera del proyecto salen atenuados.
+- **Registro**: lo último que ha pasado: ediciones, fallos, denegaciones, agentes, compactaciones y bloqueos de hooks.
 - **Proyecto**: carpeta, rama de git y cambios sin commitear (`+120 −34 · 5 sin commitear`).
-- **Estado en directo**: modelo, esfuerzo y la herramienta que se está usando, con cronómetro.
+- **Estado en directo**: modelo, esfuerzo, modo de permisos (`plan`, `acceptEdits`…) y la herramienta que se está usando, con cronómetro.
+- **Línea de estado**: con el panel cerrado, `ctx 42% · 5h 60% · $3.20` sigue bajo el prompt.
+- **Resumen encima del prompt**: fuera de pantalla completa el panel pasa a un resumen de 8 filas.
+- **`/clear`** reinicia el panel con la sesión nueva.
 - **11 temas**, cada uno con paleta para fondo oscuro **y** para fondo claro, con el contraste WCAG comprobado en todos los colores.
 - **Fondo**: el de la terminal, o el panel pintado en oscuro o en claro, con el texto a juego.
 - **Cualquier idioma**: 6 incluidos y cualquier otro traducido una sola vez y guardado.
@@ -130,8 +134,10 @@ Abre **⚙ Ajustes** al pie del panel o escribe `/cabina config`. Cada cambio se
 | Otro idioma | cualquier nombre o código de idioma, con `custom` | — |
 | Tema | ver [Temas](#temas) | `classic` |
 | Fondo | `auto` (terminal), `dark`, `light` | `auto` |
-| Apartados | Consumo, Coste, Actividad, Agentes, Hooks, Tendencia, Archivos, Proyecto: cada uno sí/no | todos |
+| Apartados | Consumo, Coste, Actividad, Agentes, Hooks, Tendencia, Archivos, Registro, Proyecto: cada uno sí/no | todos |
 | Hooks en vivo | enciende los hooks de `settings.json` al ejecutarse; se apaga solo si un plugin de la organización se salta los eventos de Cabina, y quedan solo los bloqueos y el contexto añadido | sí |
+| Línea de estado | con el panel cerrado, contexto, límites y coste bajo el prompt | sí |
+| Presupuesto diario | dólares al día sumando sesiones, p. ej. `10`; dibuja Hoy como barra | — |
 
 Las mismas opciones están en `/config`, o en `~/.claude/settings.json`:
 

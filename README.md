@@ -45,14 +45,18 @@ Cabina docks a pane beside the conversation that keeps the numbers you usually g
 
 ## Features
 
-- **Usage**: context window, 5‑hour and 7‑day rate limits with reset countdowns, colored green → amber → red as they fill. A **compact** button shows up past 70 % context.
-- **Cost**: session total, spend per hour and what the last turn cost and took.
-- **Activity**: session length, prompts sent, most used tools and running subagents.
-- **Agents**: each subagent with its tokens and time, green while running and red when done. Past 6, a `↕` in the heading and the mouse wheel scrolls the list.
+- **Usage**: context window, 5‑hour and 7‑day rate limits with reset countdowns, colored green → amber → red as they fill. A `◆` on each limit marks where an even pace would be, and `▲ runs out in 1h25m` warns when the current pace empties it before the reset. The context bar marks where autocompact kicks in (`410k ⟲38k`: tokens used and left before it). A **compact** button shows up past 70 % context and asks for a second press.
+- **Cost**: session total, spend per hour, today and the last 7 days across sessions (against a daily budget if you set one), what the last turn cost, took and its speed in tok/s, tokens with cache hit rate, and tokens per model when several are used.
+- **Activity**: session length, prompts sent, most used tools with their failures (`Bash 12 ✗2`) and running subagents.
+- **Agents**: each subagent with its tokens and time, `●` while running, `✓` when done and a red `✗` if it failed or was stopped. Timers tick on their own without redrawing the pane. Past 6, a `↕` in the heading and the mouse wheel scrolls the list.
 - **Trend**: sparklines of context and cost per turn.
-- **Files**: files edited this session, newest first. Files outside the project are dimmed.
+- **Files**: files edited this session, newest first, with the lines Claude wrote (`+120 −34`). Files outside the project are dimmed.
+- **Log**: the latest edits, failures, denials, agents, compactions and hook blocks.
 - **Project**: folder, git branch and uncommitted changes (`+120 −34 · 5 uncommitted`).
-- **Live status**: model, effort and the tool running now, with a timer.
+- **Live status**: model, effort, permission mode (`plan`, `acceptEdits`…) and the tool running now, with a timer.
+- **Status line**: with the pane closed, `ctx 42% · 5h 60% · $3.20` stays under the prompt.
+- **Compact above the prompt**: outside fullscreen the pane becomes an 8-row summary.
+- **`/clear`** starts the pane over with the new session.
 - **11 themes**, each with a dark **and** a light palette, every color checked for WCAG contrast.
 - **Background**: keep the terminal's, or paint the pane dark or light with matching text.
 - **Any language**: 6 built in, any other translated once and cached.
@@ -130,8 +134,10 @@ Open **⚙ Settings** at the bottom of the pane, or run `/cabina config`. Every 
 | Other language | any language name or code, used with `custom` | — |
 | Theme | see [Themes](#themes) | `classic` |
 | Background | `auto` (terminal), `dark`, `light` | `auto` |
-| Sections | Usage, Cost, Activity, Agents, Hooks, Trend, Files, Project: on/off each | all on |
+| Sections | Usage, Cost, Activity, Agents, Hooks, Trend, Files, Log, Project: on/off each | all on |
 | Live hooks | lights up `settings.json` hooks as they run; turns itself off when an organization plugin skips Cabina's hook events, leaving only blocks and added context | on |
+| Status line | with the pane closed, context, limits and cost under the prompt | on |
+| Daily budget | dollars a day across sessions, e.g. `10`; draws Today as a bar | — |
 
 The same options appear in `/config`, or in `~/.claude/settings.json`:
 
