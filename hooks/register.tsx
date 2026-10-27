@@ -340,8 +340,10 @@ export const register: Register = (on, options) => {
     const claudeTheme = await $.settings.read({ key: 'theme' }).catch(() => undefined)
     await patch($, { model: await $.session.model(), cwd, ...(await gitInfo($, cwd)), prompts: await $.session.turns(), termLight: typeof claudeTheme === 'string' && claudeTheme.startsWith('light'), now: await $.clock.now() })
     await refreshUsage($)
-    if ((await readSnap($)).schema !== 1) {
-      await patch($, { schema: 1, ctxTrend: [], costTrend: [], lastTurn: undefined, turnCostStart: undefined })
+    // Estado de una versión anterior: lo que se cuenta distinto se empieza de cero.
+    // 2: la caché y los modelos se cuentan desde la 1.1.0; con los tokens de antes, el acierto saldría casi a 0.
+    if ((await readSnap($)).schema !== 2) {
+      await patch($, { schema: 2, ctxTrend: [], costTrend: [], lastTurn: undefined, turnCostStart: undefined, tokIn: 0, tokOut: 0, tokCache: 0, byModel: {} })
     }
 
     // Reloj: los cronómetros avanzan solos en terminal y escritorio (elapsed.tsx); el panel se redibuja
