@@ -175,7 +175,8 @@ const addHistory = async ($: EngineInterface, usd: number) => {
 // Con el panel cerrado, lo esencial en la línea de estado bajo el prompt; abierto, nada (ya se ve).
 const refreshStatus = async ($: EngineInterface, isOn: boolean) => {
   if (!isOn) return
-  const shown = (await $.ui.panes().catch(() => [])).some(p => p.id === PANE && p.isShown)
+  // isPlaced: abierto sin pedirlo en una terminal estrecha, el panel queda en espera sin dibujarse.
+  const shown = (await $.ui.panes().catch(() => [])).some(p => p.id === PANE && p.isShown && p.isPlaced)
   $.ui.status(shown ? undefined : statusText(await readSnap($)))
 }
 
@@ -356,6 +357,8 @@ export const register: Register = (on, options) => {
       const hooksLive = Object.values(s.hooks).some(h => h.busy || s.now - h.at < 60_000)
       const noClient = running && (await $.session.surfaces().catch(() => [])).some(x => x === 'vscode' || x === 'mobile')
       if (hooksLive || noClient || tick % 30 === 0) await patch($, { now: await $.clock.now() })
+      // Ensanchar la terminal coloca el panel sin ningún evento: la línea de estado se revisa cada 5 s.
+      if (tick % 5 === 0) await refreshStatus($, statusLine)
     })
     void addHistory($, 0)
     void $.ui.open(OPEN).then(() => refreshStatus($, statusLine)).catch(() => undefined)
