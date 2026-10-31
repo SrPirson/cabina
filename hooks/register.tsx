@@ -422,6 +422,14 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
+  // En una terminal de menos de 144 columnas, el panel que se abre al empezar espera sin dibujarse.
+  // Reabierto con el prompt de la persona detrás, cuenta como pedido y se coloca. Si lo cerró, no está en panes().
+  on('prompt.submit', async ($, e, next) => {
+    const p = (await $.ui.panes().catch(() => [])).find(x => x.id === PANE)
+    if (p && !p.isPlaced) await $.ui.open(OPEN).then(() => refreshStatus($, statusLine)).catch(() => undefined)
+    return next(e)
+  })
+
   on('turn.start', async ($, e, next) => {
     if (e.agentId !== undefined) {
       const id = e.agentId
