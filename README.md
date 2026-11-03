@@ -135,6 +135,7 @@ Open **⚙ Settings** at the bottom of the pane, or run `/cabina config`. Every 
 | Theme | see [Themes](#themes) | `classic` |
 | Background | `auto` (terminal), `dark`, `light` | `auto` |
 | Sections | Usage, Cost, Activity, Agents, Hooks, Trend, Files, Log, Project: on/off each | all on |
+| Signed-in account | shows the email of the signed-in account under Project, read from `~/.claude.json`; for when a security plugin hides it from Cabina | off |
 | Live hooks | lights up `settings.json` hooks as they run; turns itself off when an organization plugin skips Cabina's hook events, leaving only blocks and added context | on |
 | Status line | with the pane closed, context, limits and cost under the prompt | on |
 | Daily budget | dollars a day across sessions, e.g. `10`; draws Today as a bar | — |

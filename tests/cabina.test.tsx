@@ -281,3 +281,24 @@ test('la cuenta en uso se ve en «Proyecto»', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: '@ ana.p@mail.co.uk' })).toBeDefined()
   await ui.unmount()
 })
+
+test('la cuenta: si una fuente falla, pasa a la siguiente', { options: { show_account: true } }, async ($, on) => {
+  mock.env(on, { HOME: '/home/ana' })
+  const tried: string[] = []
+  on('session.identity', () => ({ value: { deny: 'no gestionado' } }) as never)
+  on('fs.read', (_, e) => {
+    tried.push(e.path)
+    if (e.path === '/home/ana/.claude.json') throw new Error('ENOENT')
+    return { value: JSON.stringify({ oauthAccount: { emailAddress: 'ana@trabajo.es' } }) } as never
+  })
+  on('ui.panes', () => ({ value: [] }))
+  on('prompt.submit', (_, e) => ({ text: e.text }) as never)
+  await $.prompt.submit({ text: 'hola' } as never)
+  expect(tried).toEqual(['/home/ana/.claude.json', '/home/ana/.claude/.config.json'])
+  const ui = await $.ui.mount({
+    plugin: 'cabina', component: 'Pane', requestId: 'cabina', surface: 'terminal',
+    props: { title: 'Cabina', isFocused: false, bodyColumns: 40, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
+  })
+  expect(await ui.find({ type: 'Text', text: '@ ana@trabajo.es' })).toBeDefined()
+  await ui.unmount()
+})

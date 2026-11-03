@@ -36,6 +36,12 @@
       "options": ["auto", "dark", "light"],
       "default": "auto"
     },
+    "show_account": {
+      "type": "boolean",
+      "title": "Cuenta en uso / Signed-in account",
+      "description": "Show the email of the signed-in account under Project, read from ~/.claude.json; for when a security plugin hides it",
+      "default": false
+    },
     "track_hooks": {
       "type": "boolean",
       "title": "Hooks en vivo / Live hooks",

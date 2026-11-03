@@ -153,6 +153,30 @@ const readSnap = async ($: EngineInterface): Promise<Snapshot> => ({ ...EMPTY, .
 const bump = ($: EngineInterface, fn: (s: Snapshot) => Snapshot) =>
   update($, snap, s => fn({ ...EMPTY, ...s })).catch(() => undefined)
 const patch = ($: EngineInterface, p: Partial<Snapshot>) => bump($, s => ({ ...s, ...p }))
+// La cuenta en uso, de la primera fuente que la dé:
+// 1. $.session.identity(): el motor, solo a un mod que instalan los ajustes gestionados.
+// 2. Con show_account, el login que Claude Code guarda en .claude.json: CLAUDE_CONFIG_DIR, la carpeta de usuario
+//    (HOME, USERPROFILE) y el .claude/.config.json de versiones antiguas.
+// Si ninguna responde, se queda lo que dio el bloque userEmail de prompt.context (hook aparte).
+const ACCOUNT_FILES = [['CLAUDE_CONFIG_DIR', '.claude.json'], ['HOME', '.claude.json'], ['USERPROFILE', '.claude.json'], ['HOME', '.claude/.config.json'], ['USERPROFILE', '.claude/.config.json']] as const
+async function accountFromFile($: EngineInterface, variable: string, file: string) {
+  const dir = variable === 'CLAUDE_CONFIG_DIR' ? await $.env.get('CLAUDE_CONFIG_DIR') : variable === 'HOME' ? await $.env.get('HOME') : await $.env.get('USERPROFILE')
+  if (!dir) return undefined
+  const email = (JSON.parse(await $.fs.read(`${dir}/${file}`)) as { oauthAccount?: { emailAddress?: unknown } }).oauthAccount?.emailAddress
+  return typeof email === 'string' && email ? email : undefined
+}
+async function readAccount($: EngineInterface, fromFile: boolean) {
+  let email: string | undefined
+  try { email = (await $.session.identity()).email } catch { /* sin esa fuente: la siguiente */ }
+  if (!email && fromFile) {
+    for (const [variable, file] of ACCOUNT_FILES) {
+      email = await accountFromFile($, variable, file).catch(() => undefined)
+      if (email) break
+    }
+  }
+  if (email) await patch($, { account: email })
+}
+
 const say = async ($: EngineInterface, kind: LogEntry['kind'], line: string) => {
   const at = await $.clock.now()
   await bump($, s => ({ ...s, log: [...s.log, { at, kind, text: line }].slice(-30) }))
@@ -327,6 +351,7 @@ export const register: Register = (on, options) => {
   // Presupuesto diario en dólares; vacío o 0, sin presupuesto.
   const budget = Number(String(options.daily_budget ?? '').replace(',', '.')) || 0
   const statusLine = options.status_line !== false
+  const showAccount = options.show_account === true
   let lastMode: string | undefined
 
   on('session.start', async ($, e, next) => {
@@ -341,6 +366,7 @@ export const register: Register = (on, options) => {
     const claudeTheme = await $.settings.read({ key: 'theme' }).catch(() => undefined)
     await patch($, { model: await $.session.model(), cwd, ...(await gitInfo($, cwd)), prompts: await $.session.turns(), termLight: typeof claudeTheme === 'string' && claudeTheme.startsWith('light'), now: await $.clock.now() })
     await refreshUsage($)
+    void readAccount($, showAccount).catch(() => undefined)
     // Estado de una versión anterior: lo que se cuenta distinto se empieza de cero.
     // 2: la caché y los modelos se cuentan desde la 1.1.0; con los tokens de antes, el acierto saldría casi a 0.
     if ((await readSnap($)).schema !== 2) {
@@ -427,6 +453,8 @@ export const register: Register = (on, options) => {
   on('prompt.submit', async ($, e, next) => {
     const p = (await $.ui.panes().catch(() => [])).find(x => x.id === PANE)
     if (p && !p.isPlaced) await $.ui.open(OPEN).then(() => refreshStatus($, statusLine)).catch(() => undefined)
+    // Un /login a otra cuenta se ve en el siguiente prompt.
+    await readAccount($, showAccount).catch(() => undefined)
     return next(e)
   })
 

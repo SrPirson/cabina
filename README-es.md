@@ -135,6 +135,7 @@ Abre **⚙ Ajustes** al pie del panel o escribe `/cabina config`. Cada cambio se
 | Tema | ver [Temas](#temas) | `classic` |
 | Fondo | `auto` (terminal), `dark`, `light` | `auto` |
 | Apartados | Consumo, Coste, Actividad, Agentes, Hooks, Tendencia, Archivos, Registro, Proyecto: cada uno sí/no | todos |
+| Cuenta en uso | muestra el correo de la cuenta con la que has iniciado sesión bajo Proyecto, leído de `~/.claude.json`; para cuando un plugin de seguridad se lo oculta a Cabina | no |
 | Hooks en vivo | enciende los hooks de `settings.json` al ejecutarse; se apaga solo si un plugin de la organización se salta los eventos de Cabina, y quedan solo los bloqueos y el contexto añadido | sí |
 | Línea de estado | con el panel cerrado, contexto, límites y coste bajo el prompt | sí |
 | Presupuesto diario | dólares al día sumando sesiones, p. ej. `10`; dibuja Hoy como barra | — |
