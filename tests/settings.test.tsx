@@ -100,3 +100,27 @@ test('/cabina close y /cabina cerrar cierran el panel', async ($, on) => {
   await $.command.run({ command: 'cabina', args: 'cerrar' } as never)
   expect(closed).toEqual(['cabina', 'cabina'])
 })
+
+test('Opciones y Presupuesto se cambian desde Ajustes', { options: { status_line: true } }, async ($, on) => {
+  const saved: Record<string, unknown> = {}
+  const toasts: unknown[] = []
+  on('config.list', () => ({ value: ['status_line', 'daily_budget'].map(f => ({ key: `cabina.${f}`, label: f })) }) as never)
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.toast', (_, e) => { toasts.push(e); return { value: {} } as never })
+  on('config.set', (_, e) => {
+    saved[e.key] = e.value
+    return { value: e.value } as never
+  })
+  const ui = await $.ui.mount({ ...SETTINGS, surface: 'terminal' })
+  await ui.press({ key: 'settings' })
+  await ui.select({ key: 'options', value: 'status_line' })
+  expect(saved['cabina.status_line']).toBe(false)
+  await ui.input({ key: 'budget', text: '7,5' })
+  expect(saved['cabina.daily_budget']).toBe('7.5')
+  await ui.input({ key: 'budget', text: 'mucho' })
+  expect(saved['cabina.daily_budget']).toBe('7.5')
+  expect(toasts.length).toBe(1)
+  await ui.input({ key: 'budget', text: '' })
+  expect(saved['cabina.daily_budget']).toBe('')
+  await ui.unmount()
+})

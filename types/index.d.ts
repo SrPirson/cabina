@@ -39,6 +39,11 @@ export type Snapshot = {
   cwd: string
   // Correo de la cuenta con la que está iniciada la sesión (del bloque userEmail del contexto).
   account?: string
+  // Plan y organización de esa cuenta ("Team · BNT"), si se conocen.
+  accountPlan?: string
+  // Coste de hoy y de 7 días de esa cuenta (today/week son de todas).
+  accToday?: number
+  accWeek?: number
   branch?: string
   git?: { changed: number; plus: number; minus: number }
   files: string[]
@@ -91,6 +96,8 @@ export type Strings = {
   tClassic: string; tColorblind: string; tContrast: string; tMono: string
   updated: string
   runsOut: string; confirm: string; today: string; secLog: string; models: string; cache: string
+  account: string; switched: string; all: string
+  options: string; optAccount: string; optStatus: string; optHooks: string; budget: string; budgetHint: string
 }
 
 declare module 'claude-code' {

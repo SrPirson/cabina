@@ -13,6 +13,8 @@ const en: Strings = {
   tClassic: 'Classic', tColorblind: 'Colour-blind safe', tContrast: 'High contrast', tMono: 'Monochrome',
   updated: 'Updated to v{n} · restart Claude Code to apply',
   runsOut: 'runs out in {n}', confirm: 'compact? press again', today: 'Today', secLog: 'Log', models: 'Models', cache: 'cache',
+  account: 'Account', switched: 'Now using {n}', all: 'All',
+  options: 'Options', optAccount: 'Signed-in account', optStatus: 'Status line', optHooks: 'Live hooks', budget: 'Daily budget', budgetHint: 'dollars a day, e.g. 10 · empty = none',
 }
 
 export const BUILT_IN: Record<string, Strings> = {
@@ -30,6 +32,8 @@ export const BUILT_IN: Record<string, Strings> = {
     tClassic: 'Clásico', tColorblind: 'Apto para daltonismo', tContrast: 'Alto contraste', tMono: 'Monocromo',
     updated: 'Actualizado a v{n} · reinicia Claude Code para aplicarlo',
     runsOut: 'se agota en {n}', confirm: '¿compactar? otra vez', today: 'Hoy', secLog: 'Registro', models: 'Modelos', cache: 'caché',
+    account: 'Cuenta', switched: 'Ahora usas {n}', all: 'Todas',
+    options: 'Opciones', optAccount: 'Cuenta en uso', optStatus: 'Línea de estado', optHooks: 'Hooks en vivo', budget: 'Presupuesto diario', budgetHint: 'dólares al día, p. ej. 10 · vacío = sin límite',
   },
   pt: {
     context: 'Contexto', h5: '5 horas', d7: '7 dias', spend: 'Gasto', cost: 'Custo', last: 'último',
@@ -44,6 +48,8 @@ export const BUILT_IN: Record<string, Strings> = {
     tClassic: 'Clássico', tColorblind: 'Para daltonismo', tContrast: 'Alto contraste', tMono: 'Monocromático',
     updated: 'Atualizado para v{n} · reinicie o Claude Code para aplicar',
     runsOut: 'esgota em {n}', confirm: 'compactar? outra vez', today: 'Hoje', secLog: 'Registo', models: 'Modelos', cache: 'cache',
+    account: 'Conta', switched: 'Agora usa {n}', all: 'Todas',
+    options: 'Opções', optAccount: 'Conta em uso', optStatus: 'Linha de estado', optHooks: 'Hooks ao vivo', budget: 'Orçamento diário', budgetHint: 'dólares por dia, ex. 10 · vazio = sem limite',
   },
   fr: {
     context: 'Contexte', h5: '5 heures', d7: '7 jours', spend: 'Dépense', cost: 'Coût', last: 'dernier',
@@ -58,6 +64,8 @@ export const BUILT_IN: Record<string, Strings> = {
     tClassic: 'Classique', tColorblind: 'Adapté au daltonisme', tContrast: 'Contraste élevé', tMono: 'Monochrome',
     updated: "Mis à jour en v{n} · redémarrez Claude Code pour l'appliquer",
     runsOut: 'épuisé dans {n}', confirm: 'compacter ? encore', today: "Aujourd'hui", secLog: 'Journal', models: 'Modèles', cache: 'cache',
+    account: 'Compte', switched: 'Compte actif : {n}', all: 'Tous',
+    options: 'Options', optAccount: 'Compte utilisé', optStatus: 'Ligne d’état', optHooks: 'Hooks en direct', budget: 'Budget quotidien', budgetHint: 'dollars par jour, ex. 10 · vide = aucun',
   },
   de: {
     context: 'Kontext', h5: '5 Std.', d7: '7 Tage', spend: 'Ausgaben', cost: 'Kosten', last: 'zuletzt',
@@ -72,6 +80,8 @@ export const BUILT_IN: Record<string, Strings> = {
     tClassic: 'Klassisch', tColorblind: 'Farbenblind-freundlich', tContrast: 'Hoher Kontrast', tMono: 'Monochrom',
     updated: 'Auf v{n} aktualisiert · Claude Code neu starten',
     runsOut: 'leer in {n}', confirm: 'kompaktieren? nochmal', today: 'Heute', secLog: 'Protokoll', models: 'Modelle', cache: 'Cache',
+    account: 'Konto', switched: 'Jetzt mit {n}', all: 'Alle',
+    options: 'Optionen', optAccount: 'Aktives Konto', optStatus: 'Statuszeile', optHooks: 'Live-Hooks', budget: 'Tagesbudget', budgetHint: 'Dollar pro Tag, z. B. 10 · leer = keins',
   },
   it: {
     context: 'Contesto', h5: '5 ore', d7: '7 giorni', spend: 'Spesa', cost: 'Costo', last: 'ultimo',
@@ -86,6 +96,8 @@ export const BUILT_IN: Record<string, Strings> = {
     tClassic: 'Classico', tColorblind: 'Adatto al daltonismo', tContrast: 'Alto contrasto', tMono: 'Monocromatico',
     updated: 'Aggiornato a v{n} · riavvia Claude Code per applicarlo',
     runsOut: 'esaurito tra {n}', confirm: 'compattare? di nuovo', today: 'Oggi', secLog: 'Registro', models: 'Modelli', cache: 'cache',
+    account: 'Account', switched: 'Ora usi {n}', all: 'Tutti',
+    options: 'Opzioni', optAccount: 'Account in uso', optStatus: 'Riga di stato', optHooks: 'Hook dal vivo', budget: 'Budget giornaliero', budgetHint: 'dollari al giorno, es. 10 · vuoto = nessuno',
   },
 }
 

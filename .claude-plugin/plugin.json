@@ -40,7 +40,7 @@
       "type": "boolean",
       "title": "Cuenta en uso / Signed-in account",
       "description": "Show the email of the signed-in account under Project, read from ~/.claude.json; for when a security plugin hides it",
-      "default": false
+      "default": true
     },
     "track_hooks": {
       "type": "boolean",

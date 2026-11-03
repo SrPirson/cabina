@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { agentUsage, dayKey, historyTotals, pace, patchStat, prettyModel, relPath, shortPath, shortstat, spark, span, statusText, tokens } from '../hooks/register'
+import { agentUsage, dayKey, planLabel, historyTotals, pace, patchStat, prettyModel, relPath, shortPath, shortstat, spark, span, statusText, tokens } from '../hooks/register'
 import { themeOf, toneOf } from '../hooks/themes'
 
 test('formatos', async () => {
@@ -282,7 +282,7 @@ test('la cuenta en uso se ve en «Proyecto»', async ($, on) => {
   await ui.unmount()
 })
 
-test('la cuenta: si una fuente falla, pasa a la siguiente', { options: { show_account: true } }, async ($, on) => {
+test('la cuenta: si una fuente falla, pasa a la siguiente', async ($, on) => {
   mock.env(on, { HOME: '/home/ana' })
   const tried: string[] = []
   on('session.identity', () => ({ value: { deny: 'no gestionado' } }) as never)
@@ -300,5 +300,35 @@ test('la cuenta: si una fuente falla, pasa a la siguiente', { options: { show_ac
     props: { title: 'Cabina', isFocused: false, bodyColumns: 40, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
   })
   expect(await ui.find({ type: 'Text', text: '@ ana@trabajo.es' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('el plan y la organización junto a la cuenta', () => {
+  expect(planLabel('claude_team', 'BNT')).toBe('Team · BNT')
+  expect(planLabel('claude_max', "ana@gmail.com's Organization")).toBe('Max')
+  expect(planLabel(undefined, undefined)).toBeUndefined()
+})
+
+test('al cambiar de cuenta avisa, y Coste separa lo de esta cuenta', async ($, on) => {
+  const today = dayKey(1_000)
+  mock.store(on, { lastAccount: 'vieja@x.com', history: { [today]: 5 }, historyByAccount: { 'ana@trabajo.es': { [today]: 2 } } })
+  mock.env(on, { HOME: '/home/ana' })
+  const toasts: string[] = []
+  on('clock.now', () => ({ value: 1_000 }))
+  on('ui.toast', (_, e) => { toasts.push(String((e as { text?: string }).text ?? e)); return { value: {} } as never })
+  on('ui.panes', () => ({ value: [] }))
+  on('session.identity', () => ({ value: { deny: 'no gestionado' } }) as never)
+  on('fs.read', () => ({ value: JSON.stringify({ oauthAccount: { emailAddress: 'ana@trabajo.es', organizationType: 'claude_team', organizationName: 'BNT' } }) }) as never)
+  on('prompt.submit', (_, e) => ({ text: e.text }) as never)
+  await $.prompt.submit({ text: 'hola' } as never)
+  expect(toasts.join()).toContain('ana@trabajo.es')
+  const ui = await $.ui.mount({
+    plugin: 'cabina', component: 'Pane', requestId: 'cabina', surface: 'terminal',
+    props: { title: 'Cabina', isFocused: false, bodyColumns: 40, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
+  })
+  expect(await ui.find({ type: 'Text', text: ' · Team · BNT' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^Account/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^All/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '$2.00' })).toBeDefined()
   await ui.unmount()
 })

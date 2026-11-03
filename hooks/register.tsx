@@ -159,22 +159,39 @@ const patch = ($: EngineInterface, p: Partial<Snapshot>) => bump($, s => ({ ...s
 //    (HOME, USERPROFILE) y el .claude/.config.json de versiones antiguas.
 // Si ninguna responde, se queda lo que dio el bloque userEmail de prompt.context (hook aparte).
 const ACCOUNT_FILES = [['CLAUDE_CONFIG_DIR', '.claude.json'], ['HOME', '.claude.json'], ['USERPROFILE', '.claude.json'], ['HOME', '.claude/.config.json'], ['USERPROFILE', '.claude/.config.json']] as const
-async function accountFromFile($: EngineInterface, variable: string, file: string) {
+const PLANS: Record<string, string> = { claude_pro: 'Pro', claude_max: 'Max', claude_team: 'Team', claude_enterprise: 'Enterprise' }
+// "Team · BNT"; la organización personal ("ana@x.com's Organization") no aporta nada y no se muestra.
+export const planLabel = (orgType?: unknown, orgName?: unknown) => [
+  typeof orgType === 'string' ? PLANS[orgType] : undefined,
+  typeof orgName === 'string' && orgName && !orgName.includes('@') && !/'s organi[sz]ation$/i.test(orgName) ? orgName : undefined,
+].filter(Boolean).join(' · ') || undefined
+type Account = { email: string; plan?: string }
+async function accountFromFile($: EngineInterface, variable: string, file: string): Promise<Account | undefined> {
   const dir = variable === 'CLAUDE_CONFIG_DIR' ? await $.env.get('CLAUDE_CONFIG_DIR') : variable === 'HOME' ? await $.env.get('HOME') : await $.env.get('USERPROFILE')
   if (!dir) return undefined
-  const email = (JSON.parse(await $.fs.read(`${dir}/${file}`)) as { oauthAccount?: { emailAddress?: unknown } }).oauthAccount?.emailAddress
-  return typeof email === 'string' && email ? email : undefined
+  const o = (JSON.parse(await $.fs.read(`${dir}/${file}`)) as { oauthAccount?: Record<string, unknown> }).oauthAccount
+  return typeof o?.emailAddress === 'string' && o.emailAddress ? { email: o.emailAddress, plan: planLabel(o.organizationType, o.organizationName) } : undefined
 }
 async function readAccount($: EngineInterface, fromFile: boolean) {
-  let email: string | undefined
-  try { email = (await $.session.identity()).email } catch { /* sin esa fuente: la siguiente */ }
-  if (!email && fromFile) {
+  let found: Account | undefined
+  try {
+    const id = await $.session.identity()
+    if (id.email) found = { email: id.email, plan: planLabel(id.organizationType) }
+  } catch { /* sin esa fuente: la siguiente */ }
+  if (!found && fromFile) {
     for (const [variable, file] of ACCOUNT_FILES) {
-      email = await accountFromFile($, variable, file).catch(() => undefined)
-      if (email) break
+      found = await accountFromFile($, variable, file).catch(() => undefined)
+      if (found) break
     }
   }
-  if (email) await patch($, { account: email })
+  if (!found) return
+  // Otra cuenta que la de la última vez (en esta sesión o en otra): un aviso, para no trabajar en la que no es.
+  const last = await $.store.get('lastAccount').catch(() => undefined)
+  if (typeof last === 'string' && last !== found.email) void $.ui.toast(fill((await read($, text)).switched, found.email))
+  if (last !== found.email) await $.store.set('lastAccount', found.email).catch(() => undefined)
+  const changed = (await readSnap($)).account !== found.email
+  await patch($, { account: found.email, accountPlan: found.plan })
+  if (changed) await addHistory($, 0)
 }
 
 const say = async ($: EngineInterface, kind: LogEntry['kind'], line: string) => {
@@ -184,16 +201,29 @@ const say = async ($: EngineInterface, kind: LogEntry['kind'], line: string) => 
 
 // Suma el coste de un turno al día de hoy en $.store (compartido entre sesiones) y deja hoy y la semana en el panel.
 // ponytail: leer y escribir no es atómico; dos sesiones que acaban turno a la vez pueden perder uno. Un ledger por sesión si importa.
+// Suma usd al día de hoy y olvida lo de hace más de 30 días.
+const addDay = (h: Record<string, number>, now: number, usd: number) => {
+  h[dayKey(now)] = (h[dayKey(now)] ?? 0) + usd
+  const oldest = dayKey(now - 30 * 86_400_000)
+  for (const k of Object.keys(h)) if (k < oldest) delete h[k]
+}
+// Historial de todas las sesiones ('history') y, aparte, por cuenta ('historyByAccount').
 const addHistory = async ($: EngineInterface, usd: number) => {
   const now = await $.clock.now()
+  const account = (await readSnap($)).account
   const h = { ...((await $.store.get('history').catch(() => undefined)) as Record<string, number> | undefined) }
+  const all = { ...((await $.store.get('historyByAccount').catch(() => undefined)) as Record<string, Record<string, number>> | undefined) }
+  const mine = { ...(account ? all[account] : undefined) }
   if (usd > 0) {
-    h[dayKey(now)] = (h[dayKey(now)] ?? 0) + usd
-    const oldest = dayKey(now - 30 * 86_400_000)
-    for (const k of Object.keys(h)) if (k < oldest) delete h[k]
+    addDay(h, now, usd)
     await $.store.set('history', h).catch(() => undefined)
+    if (account) {
+      addDay(mine, now, usd)
+      await $.store.set('historyByAccount', { ...all, [account]: mine }).catch(() => undefined)
+    }
   }
-  await patch($, historyTotals(h, now))
+  const acc = account ? historyTotals(mine, now) : undefined
+  await patch($, { ...historyTotals(h, now), accToday: acc?.today, accWeek: acc?.week })
 }
 
 // Con el panel cerrado, lo esencial en la línea de estado bajo el prompt; abierto, nada (ya se ve).
@@ -250,6 +280,13 @@ const save = async ($: EngineInterface, field: string, value: string | boolean):
 const saveOrToast = async ($: EngineInterface, field: string, value: string | boolean) => {
   const deny = await save($, field, value)
   if (deny) void $.ui.toast(deny)
+}
+// "10", "7,5" o vacío (sin presupuesto); otra cosa no se guarda y se explica qué va.
+async function saveBudget($: EngineInterface, input: string, hint: string) {
+  const v = input.trim().replace(/^\$/, '').replace(',', '.')
+  const n = Number(v)
+  if (v && !(n > 0)) return void $.ui.toast(hint)
+  await saveOrToast($, 'daily_budget', v ? String(n) : '')
 }
 
 // "es", "English", "swahili" → los dos campos de userConfig.
@@ -351,7 +388,7 @@ export const register: Register = (on, options) => {
   // Presupuesto diario en dólares; vacío o 0, sin presupuesto.
   const budget = Number(String(options.daily_budget ?? '').replace(',', '.')) || 0
   const statusLine = options.status_line !== false
-  const showAccount = options.show_account === true
+  const showAccount = options.show_account !== false
   let lastMode: string | undefined
 
   on('session.start', async ($, e, next) => {
@@ -692,6 +729,16 @@ export const register: Register = (on, options) => {
       const toggle = (id: string) => {
         if (id in visible) void saveOrToast($, `show_${id}`, !visible[id as keyof typeof visible])
       }
+      // Opciones de /config que se encienden y apagan aquí, como los apartados.
+      const flags = [
+        { value: 'show_account', label: t.optAccount, on: showAccount },
+        { value: 'status_line', label: t.optStatus, on: statusLine },
+        { value: 'track_hooks', label: t.optHooks, on: trackHooks },
+      ].map(f => ({ ...f, label: `${f.on ? '✓' : '○'} ${f.label}` }))
+      const flip = (field: string) => {
+        const f = flags.find(x => x.value === field)
+        if (f) void saveOrToast($, field, !f.on)
+      }
       const backgrounds = [
         { value: 'auto', label: t.bgAuto },
         { value: 'dark', label: t.bgDark },
@@ -730,6 +777,11 @@ export const register: Register = (on, options) => {
             <ui.Select key="background" label={t.background} options={backgrounds} value={background}
               onSelect={value => void saveOrToast($, 'background', value)} />
             <ui.Select key="sections" label={t.sections} options={sections} onSelect={toggle} />
+            <ui.Select key="options" label={t.options} options={flags} onSelect={flip} />
+            {'Input' in ui && (
+              <ui.Input key="budget" label={t.budget} placeholder={t.budgetHint} value={budget ? String(budget) : ''}
+                onSubmit={value => void saveBudget($, value, t.budgetHint)} />
+            )}
             {swatch(themeId)}
           </Box>
         ) : (
@@ -762,6 +814,12 @@ export const register: Register = (on, options) => {
               <Text bold>{t.sections}</Text>
               {sections.map(sec => (
                 <Button key={`sec-${sec.value}`} plain onPress={() => toggle(sec.value)}>{sec.label}</Button>
+              ))}
+            </Box>
+            <Box flexDirection="column">
+              <Text bold>{t.options}</Text>
+              {flags.map(f => (
+                <Button key={`opt-${f.value}`} plain onPress={() => flip(f.value)}>{f.label}</Button>
               ))}
             </Box>
           </Box>
@@ -898,7 +956,7 @@ export const register: Register = (on, options) => {
           {ctxGauge}
           {s.limits.map(limitGauge)}
           <Text {...dim} wrap="truncate">
-            {[s.costUsd === undefined ? '' : `$${s.costUsd.toFixed(2)}`, s.lastTurn ? `+$${s.lastTurn.costUsd.toFixed(2)}` : '', s.branch ? `⎇ ${s.branch}` : '']
+            {[s.costUsd === undefined ? '' : `$${s.costUsd.toFixed(2)}`, s.lastTurn ? `+$${s.lastTurn.costUsd.toFixed(2)}` : '', s.branch ? `⎇ ${s.branch}` : '', s.account ? `@ ${s.account}` : '']
               .filter(Boolean).join(' · ')}
           </Text>
         </Box>
@@ -908,6 +966,8 @@ export const register: Register = (on, options) => {
     // Apartados fijos: estado, consumo, coste y proyecto. Los demás, por prioridad, solo si caben
     // (cada uno cuenta su cabecera y el hueco que lo separa).
     const showCompact = ctx >= 70 || s.compactions > 0
+    // La línea de la cuenta en Coste solo dice algo si otras cuentas también gastaron esta semana.
+    const otherAccounts = s.account !== undefined && s.accWeek !== undefined && s.today !== undefined && (s.week ?? 0) - s.accWeek > 0.005
     const hasChanges = s.git !== undefined && s.git.changed > 0
     const runsOut = s.limits.map(l => pace(l, s.now)?.runsOutIn)
     const models = Object.entries(
@@ -915,7 +975,7 @@ export const register: Register = (on, options) => {
     ).sort((a, b) => b[1] - a[1])
     const baseRows = 2
       + (visible.usage ? 2 + s.limits.length + runsOut.filter(Boolean).length + (showCompact ? 1 : 0) : 0)
-      + (visible.cost ? 3 + (s.lastTurn ? 1 : 0) + (s.tokIn ? 1 : 0) + (s.today !== undefined ? 1 : 0) + (models.length > 1 ? 1 : 0) : 0)
+      + (visible.cost ? 3 + (s.lastTurn ? 1 : 0) + (otherAccounts ? 1 : 0) + (s.tokIn ? 1 : 0) + (s.today !== undefined ? 1 : 0) + (models.length > 1 ? 1 : 0) : 0)
       + (visible.project ? 3 + (hasChanges ? 1 : 0) + (s.account ? 1 : 0) : 2)
     const files = s.files.slice(0, 4)
     const topTools = Object.entries(s.tools).sort((a, b) => b[1] - a[1]).slice(0, 3)
@@ -931,7 +991,8 @@ export const register: Register = (on, options) => {
       hooks: hookEvents.length ? 1 + hookEvents.length : 0,
       files: files.length ? 2 + files.length : 0,
       activity: s.startedAt !== undefined ? 3 + (topTools.length ? 1 : 0) + (s.agents.length ? 1 : 0) : 0,
-      trend: trendLen >= 3 ? 5 : 0,
+      // Con menos de 5 turnos la gráfica es una raya: mejor no ocuparle sitio.
+      trend: trendLen >= 5 ? 5 : 0,
       log: log.length ? 2 + log.length : 0,
     }
     let room = e.props.scroll.bodyRows - baseRows
@@ -1010,13 +1071,19 @@ export const register: Register = (on, options) => {
             </Text>
           ))}
           {s.today !== undefined && (budget > 0
-            ? gauge(t.today, (s.today / budget) * 100, `$${s.today.toFixed(2)}/$${budget} · ${t.d7} $${(s.week ?? 0).toFixed(2)}`)
-            : row(t.today, (
+            ? gauge(otherAccounts ? t.all : t.today, (s.today / budget) * 100, `$${s.today.toFixed(2)}/$${budget} · ${t.d7} $${(s.week ?? 0).toFixed(2)}`)
+            : row(otherAccounts ? t.all : t.today, (
               <Text color={fg} wrap="truncate">
                 {`$${s.today.toFixed(2)}`}
                 <Text {...dim}>{` · ${t.d7} $${(s.week ?? 0).toFixed(2)}`}</Text>
               </Text>
             )))}
+          {otherAccounts && row(t.account, (
+            <Text color={fg} wrap="truncate">
+              {`$${(s.accToday ?? 0).toFixed(2)}`}
+              <Text {...dim}>{` · ${t.d7} $${(s.accWeek ?? 0).toFixed(2)}`}</Text>
+            </Text>
+          ))}
           {s.lastTurn && row(lastLabel, (
             <Text {...dim} wrap="truncate">
               {[`+$${s.lastTurn.costUsd.toFixed(2)}`, span(s.lastTurn.durationMs), s.lastTurn.tokPerSec ? `${Math.round(s.lastTurn.tokPerSec)} tok/s` : '']
@@ -1170,7 +1237,13 @@ export const register: Register = (on, options) => {
             </Box>
             {corner}
           </Box>
-          {s.account && <Text {...dim} wrap="truncate">{`@ ${s.account}`}</Text>}
+          {s.account && (
+            <Text color={fg} wrap="truncate">
+              <Text {...dim}>@ </Text>
+              {s.account}
+              {s.accountPlan && <Text {...dim}>{` · ${s.accountPlan}`}</Text>}
+            </Text>
+          )}
           {hasChanges && s.git && (
             <Text color={fg} wrap="truncate">
               <Text color={theme.ok}>{`+${s.git.plus}`}</Text>

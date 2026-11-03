@@ -46,13 +46,13 @@ Cabina coloca junto a la conversación un panel con los datos que normalmente ti
 ## Funciones
 
 - **Consumo**: ventana de contexto y límites de 5 horas y 7 días con cuenta atrás hasta el reinicio, en verde → ámbar → rojo según se llenan. Un `◆` en cada límite marca dónde irías a ritmo uniforme, y `▲ se agota en 1h25m` avisa cuando al ritmo actual se acaba antes del reinicio. La barra de contexto marca dónde salta el autocompactado (`410k ⟲38k`: tokens usados y los que quedan hasta él). Al pasar del 70 % aparece un botón para **compactar**, que pide una segunda pulsación.
-- **Coste**: total de la sesión, gasto por hora, hoy y los últimos 7 días sumando todas las sesiones (frente a un presupuesto diario si lo pones), lo que costó, duró y a qué velocidad (tok/s) fue el último turno, tokens con el acierto de caché y tokens por modelo cuando hay varios.
+- **Coste**: total de la sesión, gasto por hora, hoy y los últimos 7 días sumando todas las sesiones (frente a un presupuesto diario si lo pones), lo que costó, duró y a qué velocidad (tok/s) fue el último turno, tokens con el acierto de caché y tokens por modelo cuando hay varios. Si usas varias cuentas, «Cuenta» separa lo gastado con la actual de lo de «Todas».
 - **Actividad**: duración de la sesión, prompts enviados, herramientas más usadas con sus fallos (`Bash 12 ✗2`) y subagentes en curso.
 - **Agentes**: cada subagente con sus tokens y su tiempo, `●` mientras trabaja, `✓` al terminar y `✗` en rojo si falla o se para. Los cronómetros avanzan solos sin redibujar el panel. Si hay más de 6, un `↕` en la cabecera y la rueda del ratón recorre la lista.
 - **Tendencia**: minigráficas del contexto y del coste por turno.
 - **Archivos**: los archivos editados en la sesión, del más reciente al más antiguo, con las líneas que ha escrito Claude (`+120 −34`). Los de fuera del proyecto salen atenuados.
 - **Registro**: lo último que ha pasado: ediciones, fallos, denegaciones, agentes, compactaciones y bloqueos de hooks.
-- **Proyecto**: carpeta, rama de git y cambios sin commitear (`+120 −34 · 5 sin commitear`).
+- **Proyecto**: carpeta, rama de git, cambios sin commitear (`+120 −34 · 5 sin commitear`) y la cuenta en uso con su plan (`@ ana@empresa.com · Team · Empresa`). Al cambiar de cuenta, un aviso te lo dice.
 - **Estado en directo**: modelo, esfuerzo, modo de permisos (`plan`, `acceptEdits`…) y la herramienta que se está usando, con cronómetro.
 - **Línea de estado**: con el panel cerrado, `ctx 42% · 5h 60% · $3.20` sigue bajo el prompt.
 - **Resumen encima del prompt**: fuera de pantalla completa el panel pasa a un resumen de 8 filas.
@@ -126,7 +126,7 @@ Los subcomandos también valen en inglés: `theme`, `language`, `background`, `s
 
 ## Ajustes
 
-Abre **⚙ Ajustes** al pie del panel o escribe `/cabina config`. Cada cambio se aplica al momento.
+Abre **⚙ Ajustes** al pie del panel o escribe `/cabina config`. Cada cambio se aplica al momento. Todo lo de esta tabla se cambia ahí: Cuenta en uso, Línea de estado y Hooks en vivo en **Opciones**, y el presupuesto escribiéndolo en **Presupuesto diario**.
 
 | Ajuste | Valores | Por defecto |
 | --- | --- | --- |
@@ -135,7 +135,7 @@ Abre **⚙ Ajustes** al pie del panel o escribe `/cabina config`. Cada cambio se
 | Tema | ver [Temas](#temas) | `classic` |
 | Fondo | `auto` (terminal), `dark`, `light` | `auto` |
 | Apartados | Consumo, Coste, Actividad, Agentes, Hooks, Tendencia, Archivos, Registro, Proyecto: cada uno sí/no | todos |
-| Cuenta en uso | muestra el correo de la cuenta con la que has iniciado sesión bajo Proyecto, leído de `~/.claude.json`; para cuando un plugin de seguridad se lo oculta a Cabina | no |
+| Cuenta en uso | muestra el correo de la cuenta con la que has iniciado sesión bajo Proyecto, leído de `~/.claude.json`; para cuando un plugin de seguridad se lo oculta a Cabina | sí |
 | Hooks en vivo | enciende los hooks de `settings.json` al ejecutarse; se apaga solo si un plugin de la organización se salta los eventos de Cabina, y quedan solo los bloqueos y el contexto añadido | sí |
 | Línea de estado | con el panel cerrado, contexto, límites y coste bajo el prompt | sí |
 | Presupuesto diario | dólares al día sumando sesiones, p. ej. `10`; dibuja Hoy como barra | — |
