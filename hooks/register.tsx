@@ -430,6 +430,14 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
+  // La cuenta en uso: el motor la pasa en el bloque userEmail del contexto ($.session.identity() solo responde a mods gestionados).
+  // Se vuelve a calcular tras /clear y al compactar, así que un cambio de cuenta con /login se ve entonces.
+  on('prompt.context', async ($, e, next) => {
+    const account = e.blocks.find(b => b.name === 'userEmail')?.text.match(/[^\s@]+@[^\s@]+\.[^\s@.]+/)?.[0]
+    await patch($, { account })
+    return next(e)
+  })
+
   on('turn.start', async ($, e, next) => {
     if (e.agentId !== undefined) {
       const id = e.agentId
@@ -880,7 +888,7 @@ export const register: Register = (on, options) => {
     const baseRows = 2
       + (visible.usage ? 2 + s.limits.length + runsOut.filter(Boolean).length + (showCompact ? 1 : 0) : 0)
       + (visible.cost ? 3 + (s.lastTurn ? 1 : 0) + (s.tokIn ? 1 : 0) + (s.today !== undefined ? 1 : 0) + (models.length > 1 ? 1 : 0) : 0)
-      + (visible.project ? 3 + (hasChanges ? 1 : 0) : 2)
+      + (visible.project ? 3 + (hasChanges ? 1 : 0) + (s.account ? 1 : 0) : 2)
     const files = s.files.slice(0, 4)
     const topTools = Object.entries(s.tools).sort((a, b) => b[1] - a[1]).slice(0, 3)
     const trendLen = Math.min(s.ctxTrend.length, barWidth + 8)
@@ -1134,6 +1142,7 @@ export const register: Register = (on, options) => {
             </Box>
             {corner}
           </Box>
+          {s.account && <Text {...dim} wrap="truncate">{`@ ${s.account}`}</Text>}
           {hasChanges && s.git && (
             <Text color={fg} wrap="truncate">
               <Text color={theme.ok}>{`+${s.git.plus}`}</Text>

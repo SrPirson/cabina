@@ -270,3 +270,14 @@ test('con un agente en marcha y el fondo de la terminal, el panel se dibuja', as
   expect(row?.children.map(c => (c as { type: string }).type)).toEqual(['Text', 'Client'])
   await ui.unmount()
 })
+
+test('la cuenta en uso se ve en «Proyecto»', async ($, on) => {
+  on('prompt.context', (_, e) => ({ blocks: e.blocks }))
+  await $.prompt.context({ blocks: [{ name: 'userEmail', text: "The user's email address is ana.p@mail.co.uk. Use it only to identify the user." }] })
+  const ui = await $.ui.mount({
+    plugin: 'cabina', component: 'Pane', requestId: 'cabina', surface: 'terminal',
+    props: { title: 'Cabina', isFocused: false, bodyColumns: 40, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
+  })
+  expect(await ui.find({ type: 'Text', text: '@ ana.p@mail.co.uk' })).toBeDefined()
+  await ui.unmount()
+})

@@ -37,6 +37,8 @@ export type Snapshot = {
   hooks: Record<string, HookStat>
   lastTurn?: { durationMs: number; costUsd: number; tokPerSec?: number }
   cwd: string
+  // Correo de la cuenta con la que está iniciada la sesión (del bloque userEmail del contexto).
+  account?: string
   branch?: string
   git?: { changed: number; plus: number; minus: number }
   files: string[]
