@@ -252,11 +252,13 @@ const refreshUsage = async ($: EngineInterface) => {
   // El desglose «summary» es local y gratis: de él sale dónde salta el autocompactado.
   const u = await $.session.usage({ breakdown: 'summary' })
   const b = u.context.breakdown
+  // Recién compactado no hay cifra hasta la siguiente respuesta: vale la estimación local del desglose.
+  const est = u.context.tokens === undefined && b && u.context.window ? b.totalTokens : undefined
   await patch($, {
     autoCompactAt: b?.isAutoCompactEnabled ? b.autoCompactThreshold : undefined,
-    ctxTokens: u.context.tokens,
+    ctxTokens: u.context.tokens ?? est,
     ctxWindow: u.context.window,
-    ctxPercent: u.context.percent,
+    ctxPercent: u.context.percent ?? (est === undefined ? undefined : Math.min(100, (est / u.context.window) * 100)),
     limits: u.rateLimits,
     costUsd: u.cost?.usd,
     startedAt: u.startedAt,
@@ -641,10 +643,30 @@ export const register: Register = (on, options) => {
 
   on('session.compact', async ($, e, next) => {
     const ran = await next(e)
-    if (e.agentId === undefined) {
+    // precompute no instala nada y un skip deja la conversación como estaba: no son compactaciones.
+    if (e.agentId === undefined && e.trigger !== 'precompute' && !ran?.skip) {
       await bump($, s => ({ ...s, compactions: s.compactions + 1 }))
       await say($, 'compact', '')
     }
+    return ran
+  })
+
+  // Ya compactado: la barra de contexto se encoge hasta lo que queda, en ~0,5 s.
+  on('classic.PostCompact', async ($, e, next) => {
+    const ran = await next(e)
+    const from = await readSnap($)
+    const to = await refreshUsage($).then(() => readSnap($)).catch(() => undefined)
+    if (!to || from.ctxTokens === undefined || to.ctxTokens === undefined || to.ctxTokens >= from.ctxTokens) return ran
+    const frames = 12
+    let i = 0
+    await patch($, { ctxTokens: from.ctxTokens, ctxPercent: from.ctxPercent })
+    const timer = $.clock.every(40, () => {
+      i++
+      if (i >= frames) timer.cancel()
+      const k = 1 - (1 - i / frames) ** 3 // ease-out
+      const lerp = (a: number, b: number) => (i >= frames ? b : a + (b - a) * k)
+      void patch($, { ctxTokens: Math.round(lerp(from.ctxTokens!, to.ctxTokens!)), ctxPercent: lerp(from.ctxPercent ?? 0, to.ctxPercent ?? 0) })
+    })
     return ran
   })
 

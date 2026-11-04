@@ -332,3 +332,37 @@ test('al cambiar de cuenta avisa, y Coste separa lo de esta cuenta', async ($, o
   expect(await ui.find({ type: 'Text', text: '$2.00' })).toBeDefined()
   await ui.unmount()
 })
+
+test('tras compactar, la barra de contexto se encoge hasta la estimación local', async ($, on) => {
+  const clock = mock.clock(on)
+  let compacted = false
+  on('ui.panes', () => ({ value: [] }))
+  on('ui.status', () => ({ value: undefined }) as never)
+  on('session.measure', () => ({ changed: [] }) as never)
+  on('classic.PostCompact', () => ({}) as never)
+  on('session.usage', () => ({ value: {
+    startedAt: 0, rateLimits: [],
+    // Recién compactado el motor no da tokens: solo la estimación del desglose.
+    context: compacted
+      ? { window: 100_000, breakdown: { totalTokens: 20_000, isAutoCompactEnabled: false } }
+      : { tokens: 80_000, window: 100_000, percent: 80 },
+  } }) as never)
+  await $.session.measure({ context: { tokens: 80_000, window: 100_000, percent: 80 }, rateLimits: [], changed: [] } as never)
+  compacted = true
+  await $.classic.PostCompact({ trigger: 'manual', compact_summary: '' } as never)
+  const pct = async () => {
+    const ui = await $.ui.mount({
+      plugin: 'cabina', component: 'Pane', requestId: 'cabina', surface: 'terminal',
+      props: { title: 'Cabina', isFocused: false, bodyColumns: 60, placement: 'inline', scroll: { offset: 0, bodyRows: 8 }, view: {} },
+    })
+    const n = Number((await ui.find({ type: 'Text', text: /^\d+%$/ }))?.text.slice(0, -1))
+    await ui.unmount()
+    return n
+  }
+  await clock.advance(120)
+  const mid = await pct()
+  expect(mid).toBeLessThan(80)
+  expect(mid).toBeGreaterThan(20)
+  await clock.advance(1_000)
+  expect(await pct()).toBe(20)
+})
