@@ -28,6 +28,10 @@ export type Snapshot = {
   ctxWindow: number
   ctxPercent?: number
   limits: RateLimit[]
+  // Límites que ya avisaron en su ventana ("five_hour@<hora de reinicio>").
+  warned: string[]
+  // Otro plugin se salta los hooks clásicos de Cabina: modo de permisos, hooks y registro, incompletos.
+  bypassed?: boolean
   costUsd?: number
   compactions: number
   busySince?: number
@@ -95,7 +99,7 @@ export type Strings = {
   sections: string; secTrend: string; secAgents: string; secHooks: string; blocked: string; ago: string
   tClassic: string; tColorblind: string; tContrast: string; tMono: string
   updated: string
-  runsOut: string; confirm: string; today: string; secLog: string; models: string; cache: string
+  bypassed: string; runsOut: string; paceHigh: string; paceCritical: string; confirm: string; today: string; secLog: string; models: string; cache: string
   account: string; switched: string; all: string
   options: string; optAccount: string; optStatus: string; optHooks: string; budget: string; budgetHint: string
 }

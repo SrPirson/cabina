@@ -8,7 +8,7 @@ import { BACKGROUNDS, isThemeId, surfaceOf, THEME_IDS, themeName, themeOf, toneO
 
 const PANE = 'cabina'
 const EMPTY: Snapshot = {
-  model: '', ctxWindow: 0, limits: [], compactions: 0, agents: [], crew: [], hooks: {}, cwd: '', now: 0,
+  model: '', ctxWindow: 0, limits: [], warned: [], compactions: 0, agents: [], crew: [], hooks: {}, cwd: '', now: 0,
   files: [], tools: {}, toolErr: {}, prompts: 0, ctxTrend: [], costTrend: [], tokIn: 0, tokOut: 0, tokCache: 0,
   byModel: {}, linesPlus: 0, linesMinus: 0, log: [],
 }
@@ -74,7 +74,8 @@ const pushTrend = (list: number[], v: number) => [...list, v].slice(-30)
 const WINDOW_MS: Record<string, number> = { five_hour: 5 * 3_600_000, seven_day: 7 * 86_400_000 }
 
 // Ritmo de un límite: dónde iría con un gasto uniforme (0-100) y, si al ritmo de ahora se acaba
-// antes del reinicio, en cuánto. Sin ventana conocida, nada; en el primer 5 % de la ventana no se predice.
+// antes del reinicio, en cuánto; crítico si queda menos de una décima de la ventana.
+// Sin ventana conocida, nada; en el primer 5 % de la ventana no se predice.
 export const pace = (l: RateLimit, now: number) => {
   const win = WINDOW_MS[l.kind]
   const left = l.resetsAt ? Date.parse(l.resetsAt) - now : NaN
@@ -82,7 +83,18 @@ export const pace = (l: RateLimit, now: number) => {
   const gone = win - left
   const runsOutIn = l.percentUsed > 0 && l.percentUsed < 100 && gone >= win / 20
     ? ((100 - l.percentUsed) / l.percentUsed) * gone : undefined
-  return { expected: (gone / win) * 100, runsOutIn: runsOutIn !== undefined && runsOutIn < left ? runsOutIn : undefined }
+  const soon = runsOutIn !== undefined && runsOutIn < left ? runsOutIn : undefined
+  return { expected: (gone / win) * 100, runsOutIn: soon, critical: soon !== undefined && soon < win / 10 }
+}
+
+// Pasado el reinicio la API no avisa hasta la siguiente respuesta: la ventana se abre de nuevo a 0 %.
+// Sin ventana conocida, solo se quita la hora ya pasada.
+export const rollLimit = (l: RateLimit, now: number): RateLimit => {
+  const at = l.resetsAt ? Date.parse(l.resetsAt) : NaN
+  if (!(at <= now)) return l
+  const win = WINDOW_MS[l.kind]
+  if (!win) return { ...l, resetsAt: undefined }
+  return { ...l, percentUsed: 0, resetsAt: new Date(at + Math.ceil((now - at + 1) / win) * win).toISOString() }
 }
 
 // Líneas +/− de un Edit o Write: las de git si vienen; si no, las del parche (o el archivo entero si es nuevo).
@@ -113,10 +125,11 @@ const modelFamily = (id: string) => prettyModel(id).split(' ')[0]!
 
 // Lo esencial en una línea, para la línea de estado con el panel cerrado.
 const LIMIT_SHORT: Record<string, string> = { five_hour: '5h', seven_day: '7d', spend_limit: '$' }
-export const statusText = (s: Snapshot) => {
+export const statusText = (snap: Snapshot) => {
+  const s = { ...snap, limits: snap.limits.map(l => rollLimit(l, snap.now)) }
   const parts = [
     s.ctxPercent !== undefined ? `ctx ${Math.round(s.ctxPercent)}%` : undefined,
-    ...s.limits.map(l => `${LIMIT_SHORT[l.kind] ?? l.kind} ${Math.round(l.percentUsed)}%`),
+    ...s.limits.map(l => `${LIMIT_SHORT[l.kind] ?? l.kind} ${Math.round(l.percentUsed)}%${pace(l, s.now)?.runsOutIn !== undefined ? ' ▲' : ''}`),
     s.costUsd !== undefined ? `$${s.costUsd.toFixed(2)}` : undefined,
   ].filter(Boolean)
   return parts.length ? `Cabina · ${parts.join(' · ')}` : undefined
@@ -263,7 +276,28 @@ const refreshUsage = async ($: EngineInterface) => {
     costUsd: u.cost?.usd,
     startedAt: u.startedAt,
   })
+  await warnLimits($)
   return u
+}
+
+// Un límite crítico (o del 90 %) avisa fuera del panel, una vez por ventana: la clave es su hora de reinicio.
+export const warnLimits = async ($: EngineInterface) => {
+  const s = await readSnap($)
+  const now = await $.clock.now()
+  const t = await read($, text)
+  const label: Record<string, string> = { five_hour: t.h5, seven_day: t.d7, spend_limit: t.spend }
+  for (const l of s.limits.map(x => rollLimit(x, now))) {
+    const p = pace(l, now)
+    if (!p?.critical && l.percentUsed < 90) continue
+    // Redondeada a la hora: la API puede mover el reinicio unos segundos entre respuestas.
+    const key = `${l.kind}@${l.resetsAt ? Math.round(Date.parse(l.resetsAt) / 3_600_000) : ''}`
+    if (s.warned.includes(key)) continue
+    await bump($, x => ({ ...x, warned: [...x.warned, key].slice(-10) }))
+    const msg = `▲ ${label[l.kind] ?? l.kind} ${Math.round(l.percentUsed)}%`
+      + (p?.runsOutIn !== undefined ? ` · ${fill(t.runsOut, span(p.runsOutIn))}` : '')
+    const sent = await $.ui.notify(msg).catch(() => undefined)
+    if (!sent?.isSent) $.ui.toast(`Cabina · ${msg}`)
+  }
 }
 
 const openSettings = async ($: EngineInterface) => {
@@ -421,7 +455,11 @@ export const register: Register = (on, options) => {
       const running = s.busySince !== undefined || s.crew.some(a => a.endedAt === undefined)
       const hooksLive = Object.values(s.hooks).some(h => h.busy || s.now - h.at < 60_000)
       const noClient = running && (await $.session.surfaces().catch(() => [])).some(x => x === 'vscode' || x === 'mobile')
-      if (hooksLive || noClient || tick % 30 === 0) await patch($, { now: await $.clock.now() })
+      const now = await $.clock.now()
+      // Al pasar un reinicio, la ventana nueva se ve en el acto y no al siguiente redibujo.
+      const reset = s.limits.some(l => { const at = Date.parse(l.resetsAt ?? ''); return at > s.now && at <= now })
+      if (hooksLive || noClient || reset || tick % 30 === 0) await patch($, { now })
+      if (reset) await refreshStatus($, statusLine)
       // Ensanchar la terminal coloca el panel sin ningún evento: la línea de estado se revisa cada 5 s.
       if (tick % 5 === 0) await refreshStatus($, statusLine)
     })
@@ -483,6 +521,7 @@ export const register: Register = (on, options) => {
       limits: e.rateLimits,
       costUsd: e.cost?.usd,
     })
+    await warnLimits($)
     await refreshStatus($, statusLine)
     return next(e)
   })
@@ -570,11 +609,15 @@ export const register: Register = (on, options) => {
     if (isMain) await patch($, { tool })
     try {
       const ran = await next(e)
-      // Toda llamada que llega a ejecutarse pasa antes por classic.PreToolUse; si nunca nos llega, nos lo saltan.
+      // Toda llamada que llega a ejecutarse pasa antes por classic.PreToolUse; si nunca nos llega, otro plugin
+      // (p. ej. cc-plugin-sec-default) se salta los hooks clásicos de Cabina y el panel lo dice.
       // Tres seguidas, por si alguna llamada no lo dispara (las de $.tool.call de otro plugin).
-      if (trackHooks && misses < 3 && !ran.isError && !('deny' in ran && ran.deny)) {
+      if (misses < 3 && !ran.isError && !('deny' in ran && ran.deny)) {
         misses = seenPre.delete(e.tool_use_id) ? 0 : misses + 1
-        if (misses === 3) void save($, 'track_hooks', false)
+        if (misses === 3) {
+          await patch($, { bypassed: true })
+          if (trackHooks) void save($, 'track_hooks', false)
+        }
       }
       // Herramientas usadas (también por subagentes) y archivos que se escribieron bien.
       const file = 'file_path' in e && typeof e.file_path === 'string' ? e.file_path
@@ -688,9 +731,16 @@ export const register: Register = (on, options) => {
       lastMode = mode
       await patch($, { permissionMode: mode })
     }
-    if (!trackHooks) return next(e)
     const event = next.event.slice('classic.'.length)
-    if (event === 'PreToolUse' && 'tool_use_id' in e) seenPre.add(e.tool_use_id)
+    if (event === 'PreToolUse' && 'tool_use_id' in e) {
+      seenPre.add(e.tool_use_id)
+      // Tras una recarga `misses` vuelve a 0, pero el aviso sigue en el estado.
+      if (misses >= 3 || (await readSnap($)).bypassed) {
+        misses = 0
+        await patch($, { bypassed: false })
+      }
+    }
+    if (!trackHooks) return next(e)
     if (!configured.has(event)) return next(e)
     const detail = 'tool' in e ? e.tool : 'tool_name' in e ? e.tool_name : undefined
     const mark = async (busy: boolean, blocked = false) => {
@@ -857,7 +907,8 @@ export const register: Register = (on, options) => {
 
     const els = $.ui.resolve(e)
     const { Box, Text, Button } = els
-    const s = await readSnap($)
+    const snap = await readSnap($)
+    const s = { ...snap, limits: snap.limits.map(l => rollLimit(l, snap.now)) }
     // /model no abre turno, y classic.PostModelSwitch no llega aquí en cuentas
     // con ajustes gestionados (cc-plugin-sec-default se lo queda): se lee en vivo.
     const liveModel = await $.session.model().catch(() => s.model)
@@ -882,11 +933,12 @@ export const register: Register = (on, options) => {
 
     // Cronómetro: en terminal y escritorio avanza solo (elapsed.tsx) sin redibujar el panel.
     const hasClient = 'Client' in els && (e.surface === 'terminal' || e.surface === 'desktop')
-    const clock = (key: string, since: number, color?: string) => hasClient
+    // `since` cuenta lo que lleva; `until`, lo que falta.
+    const clock = (key: string, at: { since: number } | { until: number }, color?: string) => hasClient
       // Un Client no admite props undefined: sin color, la clave no va.
       ? <els.Client key={key} module="./elapsed.tsx"
-        props={{ since, now: s.now, dim: !color && !surface, ...((color ?? surface?.sub) ? { color: color ?? surface?.sub } : {}) }} />
-      : <Text color={color} {...(color ? {} : dim)}>{span(s.now - since)}</Text>
+        props={{ ...at, now: s.now, dim: !color && !surface, ...((color ?? surface?.sub) ? { color: color ?? surface?.sub } : {}) }} />
+      : <Text color={color} {...(color ? {} : dim)}>{span('until' in at ? at.until - s.now : s.now - at.since)}</Text>
 
     // Cabecera de cada apartado: nombre en el color de acento y una regla hasta el borde.
     const section = (title: string, right = '') => {
@@ -902,12 +954,16 @@ export const register: Register = (on, options) => {
     }
 
     // Barra con una marca opcional (◆ ritmo uniforme, ┃ autocompactado); las celdas seguidas del mismo color van juntas.
-    const gauge = (label: string, pct: number, right: string, mark?: { at: number; glyph: string }) => {
-      const full = Math.round((Math.min(100, Math.max(0, pct)) / 100) * barWidth)
+    const gauge = (label: string, pct: number, right: string | JSX.Element, mark?: { at: number; glyph: string }) => {
+      // Medias celdas: la última, si va a medias, es ╸ (mitad izquierda).
+      const halves = Math.round((Math.min(100, Math.max(0, pct)) / 100) * barWidth * 2)
+      const full = Math.floor(halves / 2)
       const markAt = mark ? Math.min(barWidth - 1, Math.max(0, Math.floor((mark.at / 100) * barWidth))) : -1
       const runs: [string, string | undefined][] = []
       for (let i = 0; i < barWidth; i++) {
-        const [ch, color] = i === markAt ? [mark!.glyph, fg] : ['━', i < full ? toneOf(theme, pct) : muted]
+        const [ch, color] = i === markAt ? [mark!.glyph, fg]
+          : i === full && halves % 2 ? ['╸', toneOf(theme, pct)]
+          : ['━', i < full ? toneOf(theme, pct) : muted]
         const last = runs[runs.length - 1]
         if (last && last[1] === color) last[0] += ch
         else runs.push([ch, color])
@@ -915,9 +971,9 @@ export const register: Register = (on, options) => {
       return (
         <Box flexDirection="row" gap={1}>
           <Box width={labelWidth}><Text {...dim} wrap="truncate">{label}</Text></Box>
-          <Text color={fg}>{runs.map(([ch, color], i) => <Text key={`${i}`} color={color} bold={ch !== '━'}>{ch}</Text>)}</Text>
+          <Text color={fg}>{runs.map(([ch, color], i) => <Text key={`${i}`} color={color} bold={color === fg}>{ch}</Text>)}</Text>
           <Box width={4} justifyContent="flex-end"><Text color={fg} bold>{`${Math.round(pct)}%`}</Text></Box>
-          <Text {...dim} wrap="truncate">{right}</Text>
+          {typeof right === 'string' ? <Text {...dim} wrap="truncate">{right}</Text> : right}
         </Box>
       )
     }
@@ -944,7 +1000,7 @@ export const register: Register = (on, options) => {
         {busy ? (
           <Box flexDirection="row" flexShrink={0}>
             {s.tool && <Text color={theme.accent}>{`${s.tool} · `}</Text>}
-            {clock('busy', s.busySince ?? s.now, theme.accent)}
+            {clock('busy', { since: s.busySince ?? s.now }, theme.accent)}
           </Box>
         ) : <Text color={muted}>{t.idle}</Text>}
       </Box>
@@ -960,12 +1016,18 @@ export const register: Register = (on, options) => {
         : s.ctxWindow ? `${tokens(s.ctxTokens ?? 0)}/${tokens(s.ctxWindow)}` : '',
       s.autoCompactAt !== undefined && s.ctxWindow ? { at: (s.autoCompactAt / s.ctxWindow) * 100, glyph: '┃' } : undefined,
     )
-    const limitGauge = (l: (typeof s.limits)[number]) => {
+    // Con `warn`, un ▲ tras el reinicio: el resumen no tiene sitio para la línea de aviso.
+    const limitGauge = (l: (typeof s.limits)[number], warn = false) => {
       const p = pace(l, s.now)
+      const flag = warn && p?.runsOutIn !== undefined
       return gauge(
         limitLabel[l.kind] ?? l.kind,
         l.percentUsed,
-        l.resetsAt ? `↻ ${span(Date.parse(l.resetsAt) - s.now)}` : '',
+        <Box flexDirection="row" flexShrink={1}>
+          {l.resetsAt && <Text {...dim}>{'↻ '}</Text>}
+          {l.resetsAt && clock(`reset-${l.kind}`, { until: Date.parse(l.resetsAt) })}
+          {flag && <Text color={p!.critical ? theme.danger : theme.warn} bold>{' ▲'}</Text>}
+        </Box>,
         p && { at: p.expected, glyph: '◆' },
       )
     }
@@ -976,7 +1038,7 @@ export const register: Register = (on, options) => {
         <Box flexDirection="column">
           {header}
           {ctxGauge}
-          {s.limits.map(limitGauge)}
+          {s.limits.map(l => limitGauge(l, true))}
           <Text {...dim} wrap="truncate">
             {[s.costUsd === undefined ? '' : `$${s.costUsd.toFixed(2)}`, s.lastTurn ? `+$${s.lastTurn.costUsd.toFixed(2)}` : '', s.branch ? `⎇ ${s.branch}` : '', s.account ? `@ ${s.account}` : '']
               .filter(Boolean).join(' · ')}
@@ -991,11 +1053,12 @@ export const register: Register = (on, options) => {
     // La línea de la cuenta en Coste solo dice algo si otras cuentas también gastaron esta semana.
     const otherAccounts = s.account !== undefined && s.accWeek !== undefined && s.today !== undefined && (s.week ?? 0) - s.accWeek > 0.005
     const hasChanges = s.git !== undefined && s.git.changed > 0
-    const runsOut = s.limits.map(l => pace(l, s.now)?.runsOutIn)
+    const paces = s.limits.map(l => pace(l, s.now))
+    const runsOut = paces.map(p => p?.runsOutIn)
     const models = Object.entries(
       Object.entries(s.byModel).reduce<Record<string, number>>((m, [id, n]) => ({ ...m, [modelFamily(id)]: (m[modelFamily(id)] ?? 0) + n }), {}),
     ).sort((a, b) => b[1] - a[1])
-    const baseRows = 2
+    const baseRows = 2 + (s.bypassed ? 2 : 0)
       + (visible.usage ? 2 + s.limits.length + runsOut.filter(Boolean).length + (showCompact ? 1 : 0) : 0)
       + (visible.cost ? 3 + (s.lastTurn ? 1 : 0) + (otherAccounts ? 1 : 0) + (s.tokIn ? 1 : 0) + (s.today !== undefined ? 1 : 0) + (models.length > 1 ? 1 : 0) : 0)
       + (visible.project ? 3 + (hasChanges ? 1 : 0) + (s.account ? 1 : 0) : 2)
@@ -1062,6 +1125,7 @@ export const register: Register = (on, options) => {
       <Box flexDirection="column" gap={1} backgroundColor={surface?.bg} paddingX={surface ? 1 : 0}
         minHeight={surface ? e.props.scroll.bodyRows : undefined}>
         {header}
+        {s.bypassed && <Text color={theme.warn} wrap="truncate">{`▲ ${t.bypassed}`}</Text>}
 
         {visible.usage && <Box flexDirection="column">
           {section(t.secUsage)}
@@ -1069,7 +1133,12 @@ export const register: Register = (on, options) => {
           {s.limits.map((l, i) => (
             <Box key={l.kind} flexDirection="column">
               {limitGauge(l)}
-              {runsOut[i] !== undefined && row('', <Text color={theme.warn} wrap="truncate">{`▲ ${fill(t.runsOut, span(runsOut[i]!))}`}</Text>)}
+              {runsOut[i] !== undefined && row('', (
+                <Text color={paces[i]!.critical ? theme.danger : theme.warn} wrap="truncate">
+                  <Text bold>{`▲ ${paces[i]!.critical ? t.paceCritical : t.paceHigh}`}</Text>
+                  {` · ${fill(t.runsOut, span(runsOut[i]!))}`}
+                </Text>
+              ))}
             </Box>
           ))}
           {showCompact && (
@@ -1166,7 +1235,7 @@ export const register: Register = (on, options) => {
                   {/* Sin fragmentos: el motor los dibuja como una caja en columna y el tiempo bajaría de línea. */}
                   <Box flexDirection="row" flexShrink={0}>
                     {running && <Text {...dim}>{`${tokens(a.tokens)} · ↓ ${tokens(a.out)} · `}</Text>}
-                    {running && clock(`agent-${a.id}`, a.startedAt)}
+                    {running && clock(`agent-${a.id}`, { since: a.startedAt })}
                     {!running && <Text {...dim}>{agentUsage(a, s.now)}</Text>}
                   </Box>
                 </Box>

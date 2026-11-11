@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { agentUsage, dayKey, planLabel, historyTotals, pace, patchStat, prettyModel, relPath, shortPath, shortstat, spark, span, statusText, tokens } from '../hooks/register'
+import { agentUsage, dayKey, planLabel, historyTotals, pace, rollLimit, patchStat, prettyModel, relPath, shortPath, shortstat, spark, span, statusText, tokens } from '../hooks/register'
 import { themeOf, toneOf } from '../hooks/themes'
 
 test('formatos', async () => {
@@ -155,9 +155,12 @@ test('ritmo de los límites: marca de ritmo uniforme y aviso si se agota antes d
   const now = Date.parse('2026-10-27T12:00:00Z')
   const in2h = new Date(now + 2 * 3_600_000).toISOString()
   // Pasadas 3 de 5 horas: a ritmo uniforme iría por el 60 %.
-  expect(pace({ kind: 'five_hour', percentUsed: 30, resetsAt: in2h }, now)).toEqual({ expected: 60, runsOutIn: undefined })
+  expect(pace({ kind: 'five_hour', percentUsed: 30, resetsAt: in2h }, now)).toEqual({ expected: 60, runsOutIn: undefined, critical: false })
   // 90 % en 3 horas: el 10 % que queda dura 20 minutos, antes del reinicio.
   expect(pace({ kind: 'five_hour', percentUsed: 90, resetsAt: in2h }, now)?.runsOutIn).toBe(20 * 60_000)
+  // 20 minutos es menos de una décima de 5 horas: crítico. Con 70 % se agota en 1h 17m: solo ritmo alto.
+  expect(pace({ kind: 'five_hour', percentUsed: 90, resetsAt: in2h }, now)?.critical).toBe(true)
+  expect(pace({ kind: 'five_hour', percentUsed: 70, resetsAt: in2h }, now)).toMatchObject({ critical: false })
   // En los primeros minutos de la ventana no se predice nada.
   const early = new Date(now + (5 * 60 - 5) * 60_000).toISOString()
   expect(pace({ kind: 'five_hour', percentUsed: 10, resetsAt: early }, now)?.runsOutIn).toBeUndefined()
@@ -180,7 +183,7 @@ test('historial de coste: hoy y los últimos 7 días', async () => {
 })
 
 test('línea de estado con el panel cerrado', async () => {
-  const base = { model: '', ctxWindow: 0, limits: [], compactions: 0, agents: [], crew: [], hooks: {}, cwd: '', now: 0,
+  const base = { model: '', ctxWindow: 0, limits: [], warned: [], compactions: 0, agents: [], crew: [], hooks: {}, cwd: '', now: 0,
     files: [], tools: {}, toolErr: {}, prompts: 0, ctxTrend: [], costTrend: [], tokIn: 0, tokOut: 0, tokCache: 0,
     byModel: {}, linesPlus: 0, linesMinus: 0, log: [] }
   expect(statusText(base)).toBeUndefined()
@@ -365,4 +368,68 @@ test('tras compactar, la barra de contexto se encoge hasta la estimación local'
   expect(mid).toBeGreaterThan(20)
   await clock.advance(1_000)
   expect(await pct()).toBe(20)
+})
+
+test('límite pasado el reinicio: la ventana vuelve a 0 % con el siguiente reinicio', () => {
+  const now = Date.parse('2026-10-27T12:00:00Z')
+  const ago = new Date(now - 60_000).toISOString()
+  expect(rollLimit({ kind: 'five_hour', percentUsed: 21, resetsAt: ago }, now))
+    .toEqual({ kind: 'five_hour', percentUsed: 0, resetsAt: new Date(now - 60_000 + 5 * 3_600_000).toISOString() })
+  // Justo en el reinicio ya cuenta la ventana nueva; varias ventanas atrás salta a la siguiente que viene.
+  expect(rollLimit({ kind: 'five_hour', percentUsed: 9, resetsAt: new Date(now).toISOString() }, now).resetsAt)
+    .toBe(new Date(now + 5 * 3_600_000).toISOString())
+  expect(Date.parse(rollLimit({ kind: 'five_hour', percentUsed: 9, resetsAt: new Date(now - 11 * 3_600_000).toISOString() }, now).resetsAt!)).toBe(now + 4 * 3_600_000)
+  expect(rollLimit({ kind: 'spend_limit', percentUsed: 50, resetsAt: ago }, now)).toEqual({ kind: 'spend_limit', percentUsed: 50, resetsAt: undefined })
+  const live = { kind: 'seven_day', percentUsed: 47, resetsAt: new Date(now + 1000).toISOString() }
+  expect(rollLimit(live, now)).toBe(live)
+})
+
+test('un límite crítico avisa una sola vez en su ventana', async ($, on) => {
+  const now = Date.parse('2026-10-27T12:00:00Z')
+  on('clock.now', () => ({ value: now }))
+  on('ui.status', () => ({ value: undefined }) as never)
+  on('session.measure', () => ({ changed: [] }) as never)
+  const sent: string[] = []
+  on('ui.notify', (_, e) => { sent.push(e.text); return { value: { isSent: true } } as never })
+  // 90 % en 3 de 5 horas: el 10 % que queda dura 20 minutos.
+  const measure = (pct: number) => $.session.measure({
+    context: { tokens: 1, window: 100, percent: 1 }, changed: [],
+    rateLimits: [{ kind: 'five_hour', percentUsed: pct, resetsAt: new Date(now + 2 * 3_600_000).toISOString() }],
+  } as never)
+  await measure(90)
+  await measure(92)
+  expect(sent).toEqual(['▲ 5 hours 90% · runs out in 20m'])
+})
+
+test('el ▲ también sale en la línea de estado', () => {
+  const now = Date.parse('2026-10-27T12:00:00Z')
+  const base = { model: '', ctxWindow: 0, limits: [], warned: [], compactions: 0, agents: [], crew: [], hooks: {}, cwd: '', now,
+    files: [], tools: {}, toolErr: {}, prompts: 0, ctxTrend: [], costTrend: [], tokIn: 0, tokOut: 0, tokCache: 0,
+    byModel: {}, linesPlus: 0, linesMinus: 0, log: [] }
+  const resetsAt = new Date(now + 2 * 3_600_000).toISOString()
+  expect(statusText({ ...base, limits: [{ kind: 'five_hour', percentUsed: 90, resetsAt }] })).toBe('Cabina · 5h 90% ▲')
+  expect(statusText({ ...base, limits: [{ kind: 'five_hour', percentUsed: 30, resetsAt }] })).toBe('Cabina · 5h 30%')
+})
+
+test('la cuenta atrás del reinicio avanza sola en terminal y es texto en móvil', async ($, on) => {
+  const now = Date.parse('2026-10-27T12:00:00Z')
+  on('clock.now', () => ({ value: now }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }) as never)
+  on('ui.status', () => ({ value: undefined }) as never)
+  on('session.measure', () => ({ changed: [] }) as never)
+  await $.session.measure({
+    context: { tokens: 1, window: 100, percent: 1 }, changed: [],
+    rateLimits: [{ kind: 'five_hour', percentUsed: 10, resetsAt: new Date(now + 90 * 60_000).toISOString() }],
+  } as never)
+  // Empezar un turno deja la hora en el estado, como el reloj del panel.
+  await $.turn.start({ text: '', turnId: 't1' } as never)
+  for (const surface of ['terminal', 'mobile'] as const) {
+    const ui = await $.ui.mount({
+      plugin: 'cabina', component: 'Pane', requestId: 'cabina', surface,
+      props: { title: 'Cabina', isFocused: false, bodyColumns: 40, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
+    })
+    if (surface === 'terminal') expect(await ui.find({ key: 'reset-five_hour' })).toMatchObject({ type: 'Client', props: { props: { until: now + 90 * 60_000 } } })
+    else expect(await ui.find({ type: 'Text', text: '1h 30m' })).toBeDefined()
+    await ui.unmount()
+  }
 })
