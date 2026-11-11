@@ -433,3 +433,38 @@ test('la cuenta atrás del reinicio avanza sola en terminal y es texto en móvil
     await ui.unmount()
   }
 })
+
+test('los límites de otra sesión de la misma cuenta se adoptan si son más nuevos', async ($, on) => {
+  const clock = mock.clock(on, { now: Date.parse('2026-10-27T12:00:00Z') })
+  const store: Record<string, unknown> = {}
+  on('store.get', (_, e) => ({ value: store[(e as { key: string }).key] }) as never)
+  on('store.set', (_, e) => { const { key, value } = e as { key: string; value: unknown }; store[key] = value; return { value: undefined } as never })
+  on('ui.panes', () => ({ value: [] }))
+  on('ui.status', () => ({ value: undefined }) as never)
+  on('session.measure', () => ({ changed: [] }) as never)
+  on('classic.PostCompact', () => ({}) as never)
+  const resetsAt = new Date(clock.now() + 2 * 3_600_000).toISOString()
+  const five = (pct: number) => [{ kind: 'five_hour', percentUsed: pct, resetsAt }]
+  // La sesión propia aún cree tener 37 %.
+  on('session.usage', () => ({ value: { startedAt: 0, rateLimits: five(37), context: { tokens: 1, window: 100, percent: 1 } } }) as never)
+  const shown = async () => {
+    const ui = await $.ui.mount({
+      plugin: 'cabina', component: 'Pane', requestId: 'cabina', surface: 'terminal',
+      props: { title: 'Cabina', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
+    })
+    const n = (await ui.find({ type: 'Text', text: /^(37|38|99)%$/ }))?.text
+    await ui.unmount()
+    return n
+  }
+  await $.session.measure({ context: { tokens: 1, window: 100, percent: 1 }, changed: [], rateLimits: five(37) } as never)
+  expect((store.limits as { limits: unknown }).limits).toEqual(five(37))
+  // Otra sesión responde un minuto después con 38 %; esta lo adopta al refrescar.
+  await clock.advance(60_000)
+  store.limits = { at: clock.now(), limits: five(38) }
+  await $.classic.PostCompact({ trigger: 'manual', compact_summary: '' } as never)
+  expect(await shown()).toBe('38%')
+  // De otra cuenta, no.
+  store.limits = { at: clock.now() + 1, account: 'otra@x.com', limits: five(99) }
+  await $.classic.PostCompact({ trigger: 'manual', compact_summary: '' } as never)
+  expect(await shown()).toBe('38%')
+})

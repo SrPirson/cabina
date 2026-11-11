@@ -28,6 +28,8 @@ export type Snapshot = {
   ctxWindow: number
   ctxPercent?: number
   limits: RateLimit[]
+  // Cuándo llegó la lectura de límites que se ve (de esta sesión o de otra de la misma cuenta).
+  limitsAt?: number
   // Límites que ya avisaron en su ventana ("five_hour@<hora de reinicio>").
   warned: string[]
   // Otro plugin se salta los hooks clásicos de Cabina: modo de permisos, hooks y registro, incompletos.

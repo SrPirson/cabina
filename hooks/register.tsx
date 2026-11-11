@@ -267,17 +267,38 @@ const refreshUsage = async ($: EngineInterface) => {
   const b = u.context.breakdown
   // Recién compactado no hay cifra hasta la siguiente respuesta: vale la estimación local del desglose.
   const est = u.context.tokens === undefined && b && u.context.window ? b.totalTokens : undefined
+  // Con una lectura ya fechada (propia o de otra sesión), la de aquí no es más nueva: los límites no se tocan.
+  const known = (await readSnap($)).limitsAt !== undefined
   await patch($, {
     autoCompactAt: b?.isAutoCompactEnabled ? b.autoCompactThreshold : undefined,
     ctxTokens: u.context.tokens ?? est,
     ctxWindow: u.context.window,
     ctxPercent: u.context.percent ?? (est === undefined ? undefined : Math.min(100, (est / u.context.window) * 100)),
-    limits: u.rateLimits,
+    ...(known ? {} : { limits: u.rateLimits }),
     costUsd: u.cost?.usd,
     startedAt: u.startedAt,
   })
+  await syncLimits($)
   await warnLimits($)
   return u
+}
+
+// Los límites son de la cuenta, pero cada sesión solo los ve en sus propias respuestas: la lectura
+// más reciente se deja en $.store (común a todas las sesiones) y la que esté por detrás la adopta.
+type SharedLimits = { at: number; account?: string; limits: RateLimit[] }
+const shareLimits = async ($: EngineInterface, limits: RateLimit[]) => {
+  const at = await $.clock.now()
+  await patch($, { limits, limitsAt: at })
+  const account = (await readSnap($)).account
+  if (limits.length) await $.store.set('limits', { at, account, limits } satisfies SharedLimits).catch(() => undefined)
+}
+// true si ha adoptado la lectura de otra sesión.
+export const syncLimits = async ($: EngineInterface) => {
+  const got = (await $.store.get('limits').catch(() => undefined)) as SharedLimits | undefined
+  const s = await readSnap($)
+  if (!got?.limits?.length || got.at <= (s.limitsAt ?? 0) || got.account !== s.account) return false
+  await patch($, { limits: got.limits, limitsAt: got.at })
+  return true
 }
 
 // Un límite crítico (o del 90 %) avisa fuera del panel, una vez por ventana: la clave es su hora de reinicio.
@@ -461,7 +482,11 @@ export const register: Register = (on, options) => {
       if (hooksLive || noClient || reset || tick % 30 === 0) await patch($, { now })
       if (reset) await refreshStatus($, statusLine)
       // Ensanchar la terminal coloca el panel sin ningún evento: la línea de estado se revisa cada 5 s.
-      if (tick % 5 === 0) await refreshStatus($, statusLine)
+      if (tick % 5 === 0) {
+        // Otra sesión de la misma cuenta puede haber gastado: sus límites se ven aquí en ≤ 5 s.
+        if (await syncLimits($)) { await patch($, { now }); await warnLimits($) }
+        await refreshStatus($, statusLine)
+      }
     })
     void addHistory($, 0)
     void $.ui.open(OPEN).then(() => refreshStatus($, statusLine)).catch(() => undefined)
@@ -518,9 +543,9 @@ export const register: Register = (on, options) => {
       ctxTokens: e.context.tokens,
       ctxWindow: e.context.window,
       ctxPercent: e.context.percent,
-      limits: e.rateLimits,
       costUsd: e.cost?.usd,
     })
+    await shareLimits($, e.rateLimits)
     await warnLimits($)
     await refreshStatus($, statusLine)
     return next(e)
