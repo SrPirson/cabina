@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { agentUsage, dayKey, planLabel, historyTotals, pace, rollLimit, patchStat, prettyModel, relPath, shortPath, shortstat, spark, span, statusText, tokens } from '../hooks/register'
+import { agentUsage, dayKey, externalAgent, planLabel, historyTotals, pace, rollLimit, patchStat, prettyModel, relPath, shortPath, shortstat, spark, span, statusText, tokens } from '../hooks/register'
 import { themeOf, toneOf } from '../hooks/themes'
 
 test('formatos', async () => {
@@ -205,6 +205,55 @@ test('una edición suma sus líneas y un fallo se cuenta y entra en el registro'
   expect(await ui.find({ type: 'Text', text: /\+3 −1/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^LOG$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: 'Bash · boom' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('reconoce otra IA lanzada por Bash', () => {
+  expect(externalAgent('agy -p "hola"')).toBe('Antigravity · agy')
+  expect(externalAgent('~/.local/bin/agy -p "x" </dev/null')).toBe('Antigravity · agy')
+  expect(externalAgent('cd src && gemini -p "x"')).toBe('Gemini · gemini')
+  expect(externalAgent('out=$(codex exec "x")')).toBe('Codex · codex')
+  expect(externalAgent('npm install -g @google/gemini-cli')).toBeUndefined()
+  expect(externalAgent('grep agy README.md')).toBeUndefined()
+  expect(externalAgent('ls ~/.gemini')).toBeUndefined()
+  expect(externalAgent('which agy; agy --help 2>&1 | head -30')).toBeUndefined()
+  expect(externalAgent('agy --version')).toBeUndefined()
+  expect(externalAgent('agy -p "Di hola" --print-timeout 90s')).toBe('Antigravity · agy')
+  expect(externalAgent('agy --print-timeout 90s')).toBeUndefined()
+  expect(externalAgent('codex --help')).toBeUndefined()
+})
+
+test('una IA externa sale en Agentes y en el registro', async ($, on) => {
+  on('clock.now', () => ({ value: 1_000 }))
+  on('tool.call', () => ({ result: {} }) as never)
+  await $.tool.call({ tool: 'Bash', command: 'agy -p "hola"' } as never)
+  const ui = await $.ui.mount({
+    plugin: 'cabina', component: 'Pane', requestId: 'cabina', surface: 'terminal',
+    props: { title: 'Cabina', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 80 }, view: {} },
+  })
+  // Una fila en Agentes (su Text y el atenuado de dentro) y una en el registro, no más.
+  expect((await ui.findAll({ type: 'Text', text: /Antigravity/ })).length).toBe(3)
+  expect(agentUsage({ id: 'x', type: 'external', desc: '', tokens: 0, out: 0, tools: 0, startedAt: 0, endedAt: 12_000, external: true }, 0)).toBe('12s')
+  await ui.unmount()
+})
+
+test('un ! de la persona con otra IA también sale en Agentes', async ($, on) => {
+  const clock = mock.clock(on)
+  const row = (uuid: string, text: string) => $.session.append({
+    message: { type: 'user', content: [{ type: 'text', text }] }, door: 'prompt', origin: { kind: 'user' }, uuid,
+  } as never)
+  await row('b1', '<bash-input> agy -p "hola que tal"</bash-input>')
+  await row('b2', '<bash-input>ls</bash-input>')
+  const props = { title: 'Cabina', isFocused: false, bodyColumns: 60, placement: 'dock' as const, scroll: { offset: 0, bodyRows: 80 }, view: {} }
+  let ui = await $.ui.mount({ plugin: 'cabina', component: 'Pane', requestId: 'cabina', surface: 'terminal', props })
+  expect(await ui.find({ type: 'Text', text: /◆/ })).toBeDefined()
+  await ui.unmount()
+  await clock.advance(8_000)
+  await row('b3', '<bash-stdout>¡Hola! Muy bien.</bash-stdout><bash-stderr></bash-stderr>')
+  ui = await $.ui.mount({ plugin: 'cabina', component: 'Pane', requestId: 'cabina', surface: 'terminal', props })
+  expect(await ui.find({ type: 'Text', text: /◆/ })).toBeUndefined()
+  expect((await ui.findAll({ type: 'Text', text: /Antigravity/ })).length).toBe(3)
+  expect(await ui.find({ type: 'Text', text: '8s' })).toBeDefined()
   await ui.unmount()
 })
 

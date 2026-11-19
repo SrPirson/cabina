@@ -66,7 +66,30 @@ const touchAgent = ($: EngineInterface, id: string, fn: (a: AgentStat) => AgentS
 
 // Contexto de su última petición · salida sumada · tiempo (hasta ahora si sigue en curso).
 export const agentUsage = (a: AgentStat, now: number) =>
-  `${tokens(a.tokens)} · ↓ ${tokens(a.out)} · ${span((a.endedAt ?? now) - a.startedAt)}`
+  `${a.external ? '' : `${tokens(a.tokens)} · ↓ ${tokens(a.out)} · `}${span((a.endedAt ?? now) - a.startedAt)}`
+
+// CLIs de otras IAs; se reconocen como orden de una línea de Bash, con ruta o sin ella.
+const EXTERNAL_AI: Record<string, string> = { agy: 'Antigravity', gemini: 'Gemini', codex: 'Codex' }
+// Solo cuenta si se le pregunta algo: --help, --version y demás no son trabajo de la IA.
+const ASKS: Record<string, RegExp> = { agy: /\s(-p|--prompt|--print)(?=[\s=]|$)/, gemini: /\s(-p|--prompt)(?=[\s=]|$)/, codex: /^\s+exec\b/ }
+export const externalAgent = (command: string) => {
+  for (const m of command.matchAll(/(?:^|[;&|(\n]|\$\()\s*(?:[^\s;&|()]*\/)?(agy|gemini|codex)((?:\s[^;&|)\n]*)?)(?=$|[;&|)\n])/g)) {
+    if (ASKS[m[1]!]!.test(m[2] ?? '')) return `${EXTERNAL_AI[m[1]!]} · ${m[1]}`
+  }
+  return undefined
+}
+
+// Una IA externa entra en Agentes mientras corre; al registro solo al terminar (en curso ya se ve en Agentes).
+const startExternal = async ($: EngineInterface, id: string, desc: string) => {
+  const stat: AgentStat = { id, type: 'external', desc, tokens: 0, out: 0, tools: 0, startedAt: await $.clock.now(), external: true }
+  await bump($, s => ({ ...s, agents: [...s.agents, id], crew: [...s.crew, stat].slice(-50) }))
+}
+const endExternal = async ($: EngineInterface, id: string, desc: string, failed: boolean) => {
+  const now = await $.clock.now()
+  await bump($, s => ({ ...s, agents: s.agents.filter(a => a !== id) }))
+  await touchAgent($, id, a => ({ ...a, endedAt: now, failed }))
+  await say($, failed ? 'error' : 'done', desc)
+}
 
 const pushTrend = (list: number[], v: number) => [...list, v].slice(-30)
 
@@ -632,8 +655,14 @@ export const register: Register = (on, options) => {
     const tool = 'tool' in e ? e.tool : undefined
     const isMain = e.agentId === undefined
     if (isMain) await patch($, { tool })
+    // Otra IA lanzada por Bash: entra en Agentes mientras corre, como un subagente más.
+    const extDesc = e.tool === 'Bash' ? externalAgent(e.command) : undefined
+    const extId = `ext-${e.tool_use_id}`
+    let extFailed = true
+    if (extDesc) await startExternal($, extId, extDesc)
     try {
       const ran = await next(e)
+      extFailed = ran.isError === true || ('deny' in ran && !!ran.deny)
       // Toda llamada que llega a ejecutarse pasa antes por classic.PreToolUse; si nunca nos llega, otro plugin
       // (p. ej. cc-plugin-sec-default) se salta los hooks clásicos de Cabina y el panel lo dice.
       // Tres seguidas, por si alguna llamada no lo dispara (las de $.tool.call de otro plugin).
@@ -671,6 +700,7 @@ export const register: Register = (on, options) => {
       return ran
     } finally {
       if (isMain) await patch($, { tool: undefined })
+      if (extDesc) await endExternal($, extId, extDesc, extFailed)
     }
   })
 
@@ -788,6 +818,18 @@ export const register: Register = (on, options) => {
   // Lo que un hook de settings devuelve (un bloqueo, contexto) entra en la conversación con su evento.
   on('session.append', async ($, e, next) => {
     const ran = await next(e)
+    // Un `!` de la persona: el motor apunta <bash-input> al lanzarlo y <bash-stdout>…<bash-stderr> al acabar.
+    const text = e.message.content.map(b => (b.type === 'text' ? b.text : '')).join('').trim()
+    const bang = /^<bash-input>([\s\S]*)<\/bash-input>$/.exec(text)?.[1]
+    const bangDesc = bang === undefined ? undefined : externalAgent(bang.trim())
+    if (bangDesc) await startExternal($, `bang-${e.uuid}`, bangDesc)
+    else if (text.startsWith('<bash-stdout>')) {
+      const open = (await readSnap($)).crew.findLast(a => a.id.startsWith('bang-') && a.endedAt === undefined)
+      // Sin código de salida en la línea: falla si solo hubo stderr.
+      const out = /<bash-stdout>([\s\S]*?)<\/bash-stdout>/.exec(text)?.[1]?.trim()
+      const err = /<bash-stderr>([\s\S]*?)<\/bash-stderr>/.exec(text)?.[1]?.trim()
+      if (open) await endExternal($, open.id, open.desc, !out && !!err)
+    }
     if (e.origin.kind === 'hook') {
       const event = e.origin.event
       const at = await $.clock.now()
@@ -1248,7 +1290,8 @@ export const register: Register = (on, options) => {
               const running = a.endedAt === undefined
               const nested = a.parentId !== undefined && s.crew.some(p => p.id === a.parentId)
               // En curso ●, terminado ✓ atenuado, fallido o parado ✗ en rojo.
-              const [glyph, color] = running ? ['●', theme.ok] : a.failed ? ['✗', theme.danger] : ['✓', muted]
+              // Una IA externa en curso lleva ◆ en vez de ●.
+              const [glyph, color] = running ? [a.external ? '◆' : '●', theme.ok] : a.failed ? ['✗', theme.danger] : ['✓', muted]
               return (
                 <Box key={a.id} flexDirection="row" justifyContent="space-between" gap={1}>
                   <Box flexShrink={1}>
@@ -1259,7 +1302,7 @@ export const register: Register = (on, options) => {
                   </Box>
                   {/* Sin fragmentos: el motor los dibuja como una caja en columna y el tiempo bajaría de línea. */}
                   <Box flexDirection="row" flexShrink={0}>
-                    {running && <Text {...dim}>{`${tokens(a.tokens)} · ↓ ${tokens(a.out)} · `}</Text>}
+                    {running && !a.external && <Text {...dim}>{`${tokens(a.tokens)} · ↓ ${tokens(a.out)} · `}</Text>}
                     {running && clock(`agent-${a.id}`, { since: a.startedAt })}
                     {!running && <Text {...dim}>{agentUsage(a, s.now)}</Text>}
                   </Box>

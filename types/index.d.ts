@@ -13,6 +13,8 @@ export type AgentStat = {
   endedAt?: number
   // Terminó con error o lo pararon (un agente terminado bien no es rojo).
   failed?: boolean
+  // Otra IA lanzada por Bash (agy, gemini, codex): sus tokens no se ven desde aquí.
+  external?: boolean
 }
 
 // Una línea del registro: lo que ha pasado, lo más reciente al final.
